@@ -1,0 +1,12 @@
+# Meson / build output
+build/
+subprojects/*/
+
+# C# harness build output (BizHawk DLLs live here at runtime; never committed)
+harness/bin/
+harness/obj/
+
+# Compiled objects / local scratch
+*.o
+*.out
+*.trace
