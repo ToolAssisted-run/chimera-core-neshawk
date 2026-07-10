@@ -1,0 +1,32 @@
+name: Build and Test
+
+on:
+  pull_request:
+    branches: [ "main" ]
+  push:
+    branches: [ "main" ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Installing meson and ninja
+      run: python3 -m pip install meson ninja
+    # Header-only core + standalone tools. Building is itself a compile-check of the whole
+    # translation under -Wall -Wextra; `meson test` then runs the ROM-free cpuFuzz regression.
+    - name: Configure
+      run: meson setup build -Dbuildtype=release
+    - name: Build
+      run: ninja -C build
+    - name: Test
+      run: meson test -C build
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: meson-logs
+        path: build/meson-logs/
