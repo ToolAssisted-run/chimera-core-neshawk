@@ -432,6 +432,8 @@ void syncNesState(NES& nes, Op& op)
   op(nes.latched4016);
   op(nes.controllerDeck._left._resetting);
   op(nes.controllerDeck._left._latchedValue);
+  op(nes.controllerDeck._right._resetting);
+  op(nes.controllerDeck._right._latchedValue);
 
   op(nes.resetSignal);
   op(nes.hardResetSignal);
@@ -448,6 +450,7 @@ void syncNesState(NES& nes, Op& op)
   op(nes.controller_was_latched);
   op(nes.frame_is_done);
   op(nes._controllerButtons);
+  op(nes._controllerButtons2);
 }
 
 inline size_t nesStateSize(NES& nes)

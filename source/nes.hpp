@@ -65,10 +65,12 @@ class NES
 
   int cpuclockrate = 0;
 
-  // new input system (reduced: one standard pad in port 1, port 2 unplugged)
+  // new input system (one standard pad in port 1; port 2 unplugged by default, or a second standard
+  // pad when controllerDeck._port2Connected is set -- see NesDeck)
   NesDeck controllerDeck;
   uint8_t latched4016 = 0;
-  uint8_t _controllerButtons = 0; // current frame's P1 buttons (ButtonBit mask)
+  uint8_t _controllerButtons = 0;  // current frame's P1 buttons (ButtonBit mask)
+  uint8_t _controllerButtons2 = 0; // current frame's P2 buttons (ButtonBit mask; ignored when port 2 unplugged)
 
   int old_s = 0;
 
@@ -204,10 +206,12 @@ class NES
   }
 
   // ---- frame loop (NES.Core.cs FrameAdvance) ----
-  // buttons: P1 ButtonBit mask for this frame. Power/Reset are not expressible in .sol inputs.
-  bool FrameAdvance(uint8_t buttons)
+  // buttons: P1 ButtonBit mask for this frame. buttons2: P2 mask (ignored unless port 2 is
+  // connected). Power/Reset are not expressible in .sol inputs.
+  bool FrameAdvance(uint8_t buttons, uint8_t buttons2 = 0)
   {
     _controllerButtons = buttons;
+    _controllerButtons2 = buttons2;
 
 #ifdef _NESHAWK_DETECT_BAD_ACCESS
     cpu->badAccessLatch = 0; // per-frame: report only derails caused by THIS frame's advance
@@ -556,7 +560,7 @@ class NES
   {
     // The controllers only get strobed when transitioning from a get cycle to a put cycle.
     StrobeInfo si(latched4016, joypadStrobeValue);
-    controllerDeck.Strobe(si, _controllerButtons);
+    controllerDeck.Strobe(si, _controllerButtons, _controllerButtons2);
     latched4016 = joypadStrobeValue;
     new_strobe = (joypadStrobeValue & 1) != 0;
     if (current_strobe && !new_strobe)
@@ -590,7 +594,7 @@ class NES
       }
       else
       {
-        ret = controllerDeck.ReadB(_controllerButtons);
+        ret = controllerDeck.ReadB(_controllerButtons2);
         previous_controller2_read = ret;
       }
     }

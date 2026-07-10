@@ -84,28 +84,38 @@ class ControllerNES
   }
 };
 
-// port 2: UnpluggedNES -- Strobe is a no-op, Read returns 0
+// port 2: either UnpluggedNES (Strobe no-op, Read returns 0) when _port2Connected == false, or a
+// second standard ControllerNES when true. Default false keeps the deck byte-exact with the
+// original P1-only translation (Prince of Persia), so no existing behavior changes; games that need
+// controller 2 (e.g. Rockman's game-end glitch) set _port2Connected = true and feed a second button
+// mask. When connected, port 2 reports a real joypad (0 for the 8 button bits, then a stream of 1s),
+// which is observably different from an unplugged port's constant 0 -- that difference is exactly
+// what controller-2 glitches rely on.
 
 class NesDeck
 {
   public:
 
   ControllerNES _left;
+  ControllerNES _right;
+  bool          _port2Connected = false;
 
-  void Strobe(const StrobeInfo& s, uint8_t buttons)
+  void Strobe(const StrobeInfo& s, uint8_t buttons1, uint8_t buttons2)
   {
-    _left.Strobe(s, buttons);
-    // right port unplugged: no-op
+    _left.Strobe(s, buttons1);
+    if (_port2Connected) _right.Strobe(s, buttons2);
+    // else right port unplugged: no-op
   }
 
-  uint8_t ReadA(uint8_t buttons)
+  uint8_t ReadA(uint8_t buttons1)
   {
-    return (uint8_t)(_left.Read(buttons) & 0x19);
+    return (uint8_t)(_left.Read(buttons1) & 0x19);
   }
 
-  uint8_t ReadB(uint8_t buttons)
+  uint8_t ReadB(uint8_t buttons2)
   {
-    return 0; // UnpluggedNES.Read() & 0x19
+    if (!_port2Connected) return 0; // UnpluggedNES.Read() & 0x19
+    return (uint8_t)(_right.Read(buttons2) & 0x19);
   }
 };
 
