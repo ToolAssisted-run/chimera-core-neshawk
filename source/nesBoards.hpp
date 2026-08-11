@@ -193,6 +193,7 @@ class UxROM final : public NesBoardBase
   //configuration
   int prg_mask = 0;
   int vram_byte_mask = 0;
+  bool chrIsRom = false;   // NROM: pattern space is CHR ROM (writes ignored)
 
   //state
   int prg = 0;
@@ -237,7 +238,7 @@ class UxROM final : public NesBoardBase
   {
     if (addr < 0x2000)
     {
-      Vram[addr & vram_byte_mask] = value;
+      if (chrIsRom == false) Vram[addr & vram_byte_mask] = value;
     }
     else
     {

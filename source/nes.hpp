@@ -119,25 +119,44 @@ class NES
 
   int64_t TotalExecutedCycles() const { return cpu->TotalExecutedCycles; }
 
-  // ---- power-on (NES.cs Init, reduced to the iNES/NES-UNROM path this cart takes) ----
+  // ---- power-on (NES.cs Init: the iNES/NES-UNROM path, plus header-driven NROM) ----
   // romFile = full .nes file including the 16-byte iNES header.
   NES(const uint8_t* romFile, size_t romFileSize)
   {
-    if (romFileSize < 16 + (size_t)128 * 1024) throw std::runtime_error("ROM file too small for a 128KB-PRG UNROM cart");
+    if (romFileSize < 16) throw std::runtime_error("ROM file smaller than an iNES header");
     if (memcmp(romFile, "NES\x1A", 4) != 0) throw std::runtime_error("not an iNES file");
+    const int mapper = (romFile[6] >> 4) | (romFile[7] & 0xF0);
+    const int chr8   = romFile[5];
+    if (mapper == 0)
+    {
+      // NROM: fixed PRG (16KB mirrored via prg_mask=0, or 32KB), CHR ROM in the pattern space.
+      cart.PrgSize  = (int)romFile[4] * 16;
+      cart.VramSize = 8;
+      cart.PadH     = (romFile[6] & 1) ? 1 : 0; // flags6 bit0 set = vertical -> pads (1,0)
+      cart.PadV     = (romFile[6] & 1) ? 0 : 1; // clear = horizontal -> pads (0,1)
+      if (romFileSize < 16 + (size_t)cart.PrgSize * 1024 + (size_t)chr8 * 8 * 1024)
+        throw std::runtime_error("ROM file too small for header-declared NROM sizes");
+    }
+    else if (romFileSize < 16 + (size_t)128 * 1024) throw std::runtime_error("ROM file too small for a 128KB-PRG UNROM cart");
 
-    // cart is the hardcoded NES-UNROM CartInfo (see nesBoards.hpp)
     board = std::make_unique<UxROM>();
     board->Cart = cart;
     board->Create(this);
     board->Configure();
 
-    //create the board's rom and vrom (no trainer, no CHR for this cart)
     board->Rom.assign(romFile + 16, romFile + 16 + (size_t)cart.PrgSize * 1024);
 
     //create the vram and wram if necessary
     if (cart.VramSize != 0)
       board->Vram.assign((size_t)cart.VramSize * 1024, 0);
+
+    // NROM: the pattern space is CHR ROM -- load it and write-protect
+    if (mapper == 0 && chr8 > 0)
+    {
+      const uint8_t* chr = romFile + 16 + (size_t)cart.PrgSize * 1024;
+      std::copy(chr, chr + (size_t)chr8 * 8 * 1024, board->Vram.begin());
+      board->chrIsRom = true;
+    }
 
     board->PostConfigure();
 
@@ -156,7 +175,11 @@ class NES
     if (!board->Wram.empty())
       newboard->Wram.assign(board->Wram.size(), 0);
     if (!board->Vram.empty())
-      newboard->Vram.assign(board->Vram.size(), 0);
+    {
+      if (board->chrIsRom) newboard->Vram = board->Vram;   // CHR ROM content survives reset
+      else newboard->Vram.assign(board->Vram.size(), 0);
+      newboard->chrIsRom = board->chrIsRom;
+    }
     newboard->PostConfigure();
     // (no battery SaveRam on this cart)
 
