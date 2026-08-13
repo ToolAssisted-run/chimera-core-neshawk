@@ -10,3 +10,7 @@ harness/obj/
 *.o
 *.out
 *.trace
+
+# waterbox port build output and gate scratch
+waterbox/bin/
+waterbox/tests/work/
