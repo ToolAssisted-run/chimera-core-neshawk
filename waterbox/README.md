@@ -11,6 +11,7 @@ build for the host and for the guest, and the gate below requires the two to agr
 |---|---|
 | `waterbox.cpp` | the guest ABI layer: input, video, audio, memory domains, and the core-managed tooling |
 | `waterbox.config` | the static machine surface (geometry, controller, heap layout) and the user settings |
+| `default_keybinds.json` | default bindings for the controller this package declares, from BizHawk's own |
 | `nesPalettes.hpp` | NesHawk's palettes, generated from BizHawk's `Palettes.cs` |
 | `nes6502Disasm.hpp` | NesHawk's 6502 disassembler, generated from BizHawk's `Disassembler.cs` |
 | `audioResampler.hpp` / `audioKernel.hpp` | band-limited step resampler and its kernel |
@@ -56,7 +57,9 @@ different question, answered by [`../harness`](../harness) and [`../test`](../te
 
 `tests/run-frontend.sh` loads the package in EmuHawk (Mono, on a private Xvfb display), emulates
 with nothing pressed, and requires the resulting work RAM to match the native reference exactly;
-then it changes sync settings the way the settings dialog does and requires the machine to change.
+then it changes sync settings the way the settings dialog does and requires the machine to change,
+and starts once from a config that has never seen this controller to check that the bindings the
+package ships become the frontend's defaults.
 It pins `PreferredCores` and the script asserts `emu.getcorename()`, because a miniHawk install can
 easily hold two packages claiming the NES.
 
@@ -101,6 +104,11 @@ groups, so the frontend never learns what a nametable is:
 - buses — System Bus (with NesHawk's own `ApplySystemBusPoke` rules) and PPU Bus
 - trace — lines formatted character for character like NesHawk's, disassembly included, appended to
   a guest ring buffer and drained once per frame rather than crossing the sandbox per instruction
+
+**Key bindings** come from `default_keybinds.json` in the package, transcribed from BizHawk's
+`Assets/defctrl.json`. miniHawk ships no bindings of its own - a package that declares a controller
+says how it is played by default - so without that file the core would arrive unplayable until the
+user bound every key. Player 1 only and Reset unbound, which is BizHawk's own choice.
 
 **Frame rate and sample count** are answered after Init (`GetVsyncNumerator`,
 `GetVsyncDenominator`, `GetAudioSampleCount`) rather than declared in the config, because the region

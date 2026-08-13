@@ -141,6 +141,25 @@ for rom in "${roms[@]}"; do
 		report "$name:settings:wram" FAIL "run did not report OK (see tests/work/$name.wram1.log)"
 	fi
 
+	# --- the bindings the package ships must become the frontend's defaults ---
+	# miniHawk has no bindings of its own, so a controller it has never seen is played however the
+	# package that declared it says. Start from a config that has never heard of this controller -
+	# which is what a fresh install is - and the config EmuHawk writes on exit must hold ours.
+	# (On a machine that also has the quickerNES package installed, either package can be the one
+	# that supplies them - both declare "NES Controller" and agree on player 1. In CI, where this
+	# package is the only one in Cores/, the check is decisive.)
+	python3 "$here/forget-controller.py" "$work/config.$name.ini" "$work/config.$name.keys.ini" "NES Controller"
+	if run_frontend "$name.keys" "$work/config.$name.keys.ini" 1; then
+		if python3 "$here/check-keybinds.py" "$work/config.$name.keys.ini" \
+			"$wb/default_keybinds.json" "NES Controller" > "$work/$name.keys.txt" 2>&1; then
+			report "$name:keybinds" PASS "$(cat "$work/$name.keys.txt")"
+		else
+			report "$name:keybinds" FAIL "$(head -1 "$work/$name.keys.txt")"
+		fi
+	else
+		report "$name:keybinds" FAIL "run did not report OK (see tests/work/$name.keys.log)"
+	fi
+
 	# The region: a PAL machine runs a different frame and shows different scanlines, which the
 	# picture shows even where RAM has converged.
 	settings_config "$work/config.$name.pal.ini" '{"region": "pal"}'
