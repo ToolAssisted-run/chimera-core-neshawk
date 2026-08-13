@@ -12,5 +12,5 @@ cfg.setdefault("CoreSyncSettings", {})["BizHawk.Emulation.Common.Waterbox.Waterb
 }
 # Pick this core explicitly: a miniHawk install can hold several packages claiming the NES (the
 # quickerNES one, for a start), and --core only LOADS a package, it does not choose it.
-cfg.setdefault("PreferredCores", {})["NES"] = "QuickerNesHawk"
+cfg.setdefault("DefaultCores", {})["NES"] = "QuickerNesHawk"
 json.dump(cfg, open(sys.argv[2], "w"), indent=2)
