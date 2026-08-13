@@ -173,10 +173,11 @@ class NES
       case 1:  kind = NesBoard::Kind::SxROM; break;
       case 2:  kind = NesBoard::Kind::UxROM; break;
       case 3:  kind = NesBoard::Kind::CNROM; break;
+      case 4:  kind = NesBoard::Kind::TxROM; break;
       case 7:  kind = NesBoard::Kind::AxROM; break;
       case 66: kind = NesBoard::Kind::GxROM; break;
       case 70: kind = NesBoard::Kind::B74x;  break;
-      default: throw std::runtime_error("unsupported mapper (this translation has NROM, SxROM, UxROM, CNROM, AxROM, GxROM and mapper 70)");
+      default: throw std::runtime_error("unsupported mapper (this translation has NROM, SxROM, UxROM, CNROM, TxROM, AxROM, GxROM and mapper 70)");
     }
     if ((romFile[6] & 4) != 0) throw std::runtime_error("trainers are not supported");
 

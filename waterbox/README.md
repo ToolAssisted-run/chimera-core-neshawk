@@ -117,9 +117,9 @@ every frame.
 
 ## Limits worth knowing
 
-- **Mappers**: the boards translated so far are SxROM/MMC1 (1), NROM (0), UxROM (2), CNROM (3),
-  AxROM (7), GxROM (66) and mapper 70. Anything else is rejected at load with a message, not
-  mis-emulated. Adding one is a small, well-bounded job: transliterate the board from BizHawk's
+- **Mappers**: the boards translated so far are NROM (0), SxROM/MMC1 (1), UxROM (2), CNROM (3),
+  TxROM/MMC3 (4), AxROM (7), GxROM (66) and mapper 70 - 69 of the 79 roms in the reference
+  collection. Anything else is rejected at load with a message, not mis-emulated. Adding one is a small, well-bounded job: transliterate the board from BizHawk's
   `Boards/*.cs` into `nesBoards.hpp`, accept its mapper number in the NES constructor, and verify it
   frame by frame against genuine NesHawk with the oracle in [`../harness`](../harness).
 - **No cart database.** NesHawk resolves the board from BootGod's database keyed by rom hash, and

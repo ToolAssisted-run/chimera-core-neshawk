@@ -393,6 +393,31 @@ void syncBoard(NesBoard& board, Op& op)
   op.bytes(board._mirroring, sizeof board._mirroring);
   op(board.IrqSignal);
   op(board.prg);
+
+  // SxROM.SyncState: the serial shift register and everything it latched. The derived
+  // bank arrays are synced too rather than re-derived, so a state loads without a Sync().
+  auto& mmc1 = board.mmc1;
+  op(mmc1.shift_count); op(mmc1.shift_val);
+  op(mmc1.chr_mode); op(mmc1.prg_mode); op(mmc1.prg_slot);
+  op(mmc1.chr_0); op(mmc1.chr_1); op(mmc1.prg);
+  op(mmc1.wram_disable);
+  op(mmc1.mirror);
+  op(mmc1.ppuclock);
+  op.bytes(mmc1.chr_banks_4k, sizeof mmc1.chr_banks_4k);
+  op.bytes(mmc1.prg_banks_16k, sizeof mmc1.prg_banks_16k);
+
+  // MMC3.SyncState, plus the A12 edge detector and the derived bank arrays
+  auto& mmc3 = board.mmc3;
+  op(mmc3.reg_addr); op(mmc3.chr_mode); op(mmc3.prg_mode);
+  op.bytes(mmc3.regs, sizeof mmc3.regs);
+  op(mmc3.cmd); op(mmc3.mirror); op(mmc3.a12_old);
+  op(mmc3.irq_reload); op(mmc3.irq_counter);
+  op(mmc3.irq_pending); op(mmc3.irq_enable); op(mmc3.irq_reload_flag);
+  op(mmc3.wram_enable); op(mmc3.wram_write_protect);
+  op(mmc3.just_cleared_pending); op(mmc3.just_cleared);
+  op(mmc3.separator_counter); op(mmc3.irq_countdown);
+  op.bytes(mmc3.chr_regs_1k, sizeof mmc3.chr_regs_1k);
+  op.bytes(mmc3.prg_regs_8k, sizeof mmc3.prg_regs_8k);
 }
 
 } // namespace detail

@@ -204,6 +204,7 @@ class NesBoardBase
 //   B74x  (mapper 70, BANDAI_74_161_161_32.cs) - 16KB PRG and 8KB CHR from one write
 //   GxROM (mapper 66, GxROM.cs)                - 32KB PRG and 8KB CHR from one write
 //   SxROM (mapper 1,  SxROM.cs)                - MMC1: five writes shift into one register
+//   TxROM (mapper 4,  TxROM.cs + MMC3.cs)      - MMC3: eight bank registers and the A12 scanline IRQ
 class NesBoard final : public NesBoardBase
 {
   public:
@@ -217,6 +218,86 @@ class NesBoard final : public NesBoardBase
     B74x,
     GxROM,
     SxROM,
+    TxROM,
+  };
+
+  /// MMC3 (MMC3.cs + TxROM.cs). Eight bank registers written through a two-address protocol, and a
+  /// scanline counter that watches PPU address line A12 rise - which is why the board wants both
+  /// AddressPpu and ClockPpu. The IRQ it raises is how these games split the screen.
+  struct MMC3
+  {
+    int reg_addr = 0;
+    bool chr_mode = false, prg_mode = false;
+    uint8_t regs[8] = { 0, 2, 4, 5, 6, 7, 0, 1 };
+    uint8_t mirror = 0;
+    int a12_old = 0;
+    uint8_t irq_reload = 0, irq_counter = 0;
+    bool irq_pending = false, irq_enable = false, irq_reload_flag = false;
+    bool wram_enable = false, wram_write_protect = false;
+    bool just_cleared_pending = false, just_cleared = false;
+    int separator_counter = 0;
+    int irq_countdown = 0;
+    uint8_t cmd = 0;
+    int MirrorMask = 1;
+    uint8_t chr_regs_1k[8] = {};
+    uint8_t prg_regs_8k[4] = {};
+
+    /// MMC3.cs picks the chip revision from the cart database's chip list and falls back to MMC3C;
+    /// with no database this is always that fallback, and MMC3C is the newer IRQ behaviour.
+    static constexpr bool oldIrqType = false;
+
+    EMirrorType MirrorType() const
+    {
+      switch (mirror)
+      {
+        case 1: return EMirrorType::Horizontal;
+        case 2: return EMirrorType::OneScreenA;
+        case 3: return EMirrorType::OneScreenB;
+        default: return EMirrorType::Vertical;
+      }
+    }
+
+    void Sync()
+    {
+      if (prg_mode)
+      {
+        prg_regs_8k[0] = 0xFE;
+        prg_regs_8k[1] = regs[7];
+        prg_regs_8k[2] = regs[6];
+        prg_regs_8k[3] = 0xFF;
+      }
+      else
+      {
+        prg_regs_8k[0] = regs[6];
+        prg_regs_8k[1] = regs[7];
+        prg_regs_8k[2] = 0xFE;
+        prg_regs_8k[3] = 0xFF;
+      }
+      const uint8_t r0_0 = (uint8_t)(regs[0] & ~1);
+      const uint8_t r0_1 = (uint8_t)(regs[0] | 1);
+      const uint8_t r1_0 = (uint8_t)(regs[1] & ~1);
+      const uint8_t r1_1 = (uint8_t)(regs[1] | 1);
+      if (chr_mode)
+      {
+        chr_regs_1k[0] = regs[2]; chr_regs_1k[1] = regs[3];
+        chr_regs_1k[2] = regs[4]; chr_regs_1k[3] = regs[5];
+        chr_regs_1k[4] = r0_0;    chr_regs_1k[5] = r0_1;
+        chr_regs_1k[6] = r1_0;    chr_regs_1k[7] = r1_1;
+      }
+      else
+      {
+        chr_regs_1k[0] = r0_0;    chr_regs_1k[1] = r0_1;
+        chr_regs_1k[2] = r1_0;    chr_regs_1k[3] = r1_1;
+        chr_regs_1k[4] = regs[2]; chr_regs_1k[5] = regs[3];
+        chr_regs_1k[6] = regs[4]; chr_regs_1k[7] = regs[5];
+      }
+    }
+
+    MMC3() { Sync(); }
+
+    int PrgBank8k(int addr) const { return prg_regs_8k[addr >> 13]; }
+
+    int ChrBank1k(int addr) const { return chr_regs_1k[addr >> 10]; }
   };
 
   /// MMC1 (SxROM.cs). The cpu writes one bit at a time: five writes fill a shift register and the
@@ -362,7 +443,10 @@ class NesBoard final : public NesBoardBase
   int prg = 0;
   int chr = 0;
   MMC1 mmc1;               // SxROM only
+  MMC3 mmc3;               // TxROM only
   int chr_bank_mask = 0;   // in 4KB pages, for MMC1
+  int chr_bank_mask_1k = 0;// in 1KB pages, for MMC3
+  int prg_bank_mask_8k = 0;// in 8KB pages, for MMC3
   int vram_mask = 0;
 
   bool Configure() override
@@ -400,15 +484,80 @@ class NesBoard final : public NesBoardBase
     chr_bank_mask = Cart.ChrSize != 0 ? (Cart.ChrSize / 4) - 1 : 0;
     vram_mask = Cart.VramSize != 0 ? (Cart.VramSize * 1024) - 1 : 0;
 
+    // MMC3Board_Base.BaseSetup: PRG in 8KB banks, CHR in 1KB banks (or VRAM's own size on a
+    // CHR-RAM board), and the chip powers up vertically mirrored
+    prg_bank_mask_8k = (Cart.PrgSize / 8) - 1;
+    chr_bank_mask_1k = (Cart.ChrSize != 0 ? Cart.ChrSize : Cart.VramSize) - 1;
+    if (kind == Kind::TxROM) SetMirrorType(EMirrorType::Vertical);
+
     return true;
   }
 
-  /// SxROM counts PPU clocks to reject writes that arrive too close together.
-  bool WantsPpuClock() const override { return kind == Kind::SxROM; }
+  /// SxROM counts PPU clocks to reject writes that arrive too close together; MMC3 counts them to
+  /// time its scanline IRQ.
+  bool WantsPpuClock() const override { return kind == Kind::SxROM || kind == Kind::TxROM; }
 
   void ClockPpu() override
   {
-    if (mmc1.ppuclock < MMC1::PpuTimeout) mmc1.ppuclock++;
+    if (kind == Kind::SxROM)
+    {
+      if (mmc1.ppuclock < MMC1::PpuTimeout) mmc1.ppuclock++;
+      return;
+    }
+    // MMC3.ClockPPU
+    if (mmc3.separator_counter > 0) mmc3.separator_counter--;
+    if (mmc3.irq_countdown > 0)
+    {
+      mmc3.irq_countdown--;
+      if (mmc3.irq_countdown == 0) ClockMmc3Irq();
+    }
+    if (mmc3.just_cleared)
+    {
+      mmc3.irq_counter = 0;
+      if (MMC3::oldIrqType) mmc3.irq_reload_flag = true;
+    }
+    mmc3.just_cleared = mmc3.just_cleared_pending;
+    mmc3.just_cleared_pending = false;
+  }
+
+  /// MMC3.AddressPPU: the counter is clocked by A12 going high, with a filter that ignores rises
+  /// closer together than 15 PPU cycles. MMC3 cannot see the internal pattern tables (fixes Recca).
+  void AddressPpu(int addr) override
+  {
+    if (kind != Kind::TxROM || addr >= 0x3F00) return;
+    const int a12 = (addr >> 12) & 1;
+    if (a12 == 1 && mmc3.a12_old == 0)
+    {
+      if (mmc3.separator_counter > 0)
+      {
+        mmc3.separator_counter = 15;
+      }
+      else
+      {
+        mmc3.separator_counter = 15;
+        mmc3.irq_countdown = 5;
+      }
+    }
+    mmc3.a12_old = a12;
+  }
+
+  /// MMC3.ClockIRQ + IRQ_EQ_Pass
+  void ClockMmc3Irq()
+  {
+    const int last_irq_counter = mmc3.irq_counter;
+    if (mmc3.irq_reload_flag || mmc3.irq_counter == 0) mmc3.irq_counter = mmc3.irq_reload;
+    else mmc3.irq_counter--;
+
+    if (mmc3.irq_counter == 0)
+    {
+      const bool pass = MMC3::oldIrqType ? (last_irq_counter != 0 || mmc3.irq_reload_flag) : true;
+      if (pass)
+      {
+        if (mmc3.irq_enable) mmc3.irq_pending = true;
+        SyncIRQ(mmc3.irq_pending);
+      }
+    }
+    mmc3.irq_reload_flag = false;
   }
 
   uint8_t ReadPrg(int addr) override
@@ -424,6 +573,8 @@ class NesBoard final : public NesBoardBase
         return Rom[addr + (prg << 15)];
       case Kind::SxROM:
         return Rom[((mmc1.PrgBank(addr) & prg_mask) << 14) | (addr & 0x3FFF)];
+      case Kind::TxROM:
+        return Rom[((mmc3.PrgBank8k(addr) & prg_bank_mask_8k) << 13) | (addr & 0x1FFF)];
       default:
       {
         int block = addr >> 14;
@@ -470,13 +621,72 @@ class NesBoard final : public NesBoardBase
           SetMirrorType(mmc1.mirror); // often redundant, but gets the job done
         }
         return;
+      case Kind::TxROM:
+        WriteMmc3(addr, value);
+        SetMirrorType(mmc3.MirrorType()); // often redundant, but gets the job done
+        return;
     }
+  }
+
+  /// MMC3.WritePRG: the register pair at each address decodes from bits 13-14 and bit 0.
+  void WriteMmc3(int addr, uint8_t value)
+  {
+    switch (addr & 0x6001)
+    {
+      case 0x0000: //$8000
+        mmc3.cmd = value;
+        mmc3.chr_mode = ((value >> 7) & 1) != 0;
+        mmc3.prg_mode = ((value >> 6) & 1) != 0;
+        mmc3.reg_addr = value & 7;
+        mmc3.Sync();
+        break;
+      case 0x0001: //$8001
+        mmc3.regs[mmc3.reg_addr] = value;
+        mmc3.Sync();
+        break;
+      case 0x2000: //$A000
+        mmc3.mirror = (uint8_t)(value & mmc3.MirrorMask);
+        SetMirrorType(mmc3.MirrorType());
+        break;
+      case 0x2001: //$A001
+        mmc3.wram_write_protect = ((value >> 6) & 1) != 0;
+        mmc3.wram_enable = ((value >> 7) & 1) != 0;
+        break;
+      case 0x4000: //$C000 - IRQ reload value
+        mmc3.irq_reload = value;
+        break;
+      case 0x4001: //$C001 - IRQ clear; does not take immediate effect (fixes Klax)
+        mmc3.just_cleared_pending = true;
+        break;
+      case 0x6000: //$E000 - IRQ acknowledge / disable
+        mmc3.irq_enable = false;
+        mmc3.irq_pending = false;
+        SyncIRQ(mmc3.irq_pending);
+        break;
+      case 0x6001: //$E001 - IRQ enable
+        mmc3.irq_enable = true;
+        SyncIRQ(mmc3.irq_pending);
+        break;
+    }
+  }
+
+  /// MMC3Board_Base.MapCHR, which allows non-power-of-two CHR sizes
+  int MapChr(int addr) const
+  {
+    int bank_1k = mmc3.ChrBank1k(addr);
+    bank_1k %= chr_bank_mask_1k + 1;
+    return (bank_1k << 10) | (addr & 0x3FF);
   }
 
   uint8_t ReadPpu(int addr) override
   {
     if (addr < 0x2000)
     {
+      if (kind == Kind::TxROM)
+      {
+        const int banked = MapChr(addr);
+        return !Vrom.empty() ? Vrom[banked] : Vram[banked];
+      }
       if (kind == Kind::SxROM)
       {
         const int banked = ((mmc1.ChrBank4k(addr) & chr_bank_mask) << 12) | (addr & 0x0FFF);
@@ -502,7 +712,12 @@ class NesBoard final : public NesBoardBase
   {
     if (addr < 0x2000)
     {
-      if (kind == Kind::SxROM)
+      if (kind == Kind::TxROM)
+      {
+        // MMC3Board_Base.WritePpu: a CHR ROM board has no Vram and drops the write
+        if (!Vram.empty()) Vram[MapChr(addr)] = value;
+      }
+      else if (kind == Kind::SxROM)
       {
         // SxROM.WritePpu: CHR RAM is banked too; a CHR ROM cart ignores the write
         if (Cart.VramSize != 0)
