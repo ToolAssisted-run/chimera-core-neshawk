@@ -58,7 +58,7 @@ class NES
   uint8_t ram[0x800];
   uint8_t CIRAM[0x800]; //AKA nametables
   CartInfo cart;
-  std::unique_ptr<UxROM> board;
+  std::unique_ptr<NesBoard> board;
   int sprdma_countdown = 0;
 
   bool _irq_apu = false; //various irq signals that get merged to the cpu irq pin
@@ -162,9 +162,10 @@ class NES
     if (memcmp(romFile, "NES\x1A", 4) != 0) throw std::runtime_error("not an iNES file");
     const int mapper = (romFile[6] >> 4) | (romFile[7] & 0xF0);
     const int chr8   = romFile[5];
-    // Only the two boards translated here (NesBoardBase + UxROM, which also serves as NROM). The
-    // real NesHawk resolves the board from the BootGod DB and has a hundred more.
-    if (mapper != 0 && mapper != 2) throw std::runtime_error("unsupported mapper (only NROM and UxROM are translated)");
+    // Only the boards translated here (see NesBoard). The real NesHawk resolves the board from the
+    // BootGod DB and has a hundred more.
+    if (mapper != 0 && mapper != 2 && mapper != 7)
+      throw std::runtime_error("unsupported mapper (only NROM, UxROM and AxROM are translated)");
     if ((romFile[6] & 4) != 0) throw std::runtime_error("trainers are not supported");
 
     // Everything the two boards need comes out of the iNES header; NesHawk would take it from the
@@ -179,8 +180,10 @@ class NES
     if (romFileSize < 16 + (size_t)cart.PrgSize * 1024 + (size_t)chr8 * 8 * 1024)
       throw std::runtime_error("ROM file too small for its header-declared sizes");
 
-    board = std::make_unique<UxROM>();
-    board->prgIsFixed = (mapper == 0); // NROM has no bank register
+    board = std::make_unique<NesBoard>();
+    board->kind = mapper == 0 ? NesBoard::Kind::NROM
+      : mapper == 2 ? NesBoard::Kind::UxROM
+      : NesBoard::Kind::AxROM;
     board->Cart = cart;
     board->Create(this);
     board->Configure();
@@ -208,8 +211,8 @@ class NES
   // NES.BoardSystem.cs
   void BoardSystemHardReset()
   {
-    auto newboard = std::make_unique<UxROM>();
-    newboard->prgIsFixed = board->prgIsFixed;
+    auto newboard = std::make_unique<NesBoard>();
+    newboard->kind = board->kind;
     newboard->Cart = cart;
     newboard->Create(this);
     newboard->Configure();

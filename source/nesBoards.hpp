@@ -61,9 +61,11 @@ class NesBoardBase
 
   bool IrqSignal = false;
 
+  // state: constant for NROM/UxROM, but AxROM rewrites it on every bank switch
+  int _mirroring[4] = {0, 0, 0, 0};
+
   protected:
 
-  int _mirroring[4] = {0, 0, 0, 0};
   void SetMirroring(int a, int b, int c, int d)
   {
     _mirroring[0] = a;
@@ -184,20 +186,29 @@ class NesBoardBase
   std::vector<uint8_t> Vrom;
 };
 
-// generally mapper2 (UxROM.cs) -- VS-system branches dropped, adjust_prg is identity for NES-UNROM
-// (final: the core is built for this one cart, so board calls devirtualize and inline)
-class UxROM final : public NesBoardBase
+// The translated boards, in ONE class on purpose. BizHawk has a class per board and dispatches
+// virtually; here the board is asked on every cpu read of $8000+ (every opcode fetch), so a virtual
+// call would cost more than the branch on `kind` does. `final` keeps those calls devirtualised and
+// inlined, which is why this reads as three boards wearing one coat:
+//   NROM  (mapper 0, NROM.cs)  - fixed PRG, no bank register at all
+//   UxROM (mapper 2, UxROM.cs) - 16KB switchable + 16KB fixed, mirroring from the cart
+//   AxROM (mapper 7, AxROM.cs) - 32KB switchable, and the same write picks a one-screen nametable
+class NesBoard final : public NesBoardBase
 {
   public:
 
+  enum class Kind
+  {
+    NROM,
+    UxROM,
+    AxROM,
+  };
+
   //configuration
-  int prg_mask = 0;
+  Kind kind = Kind::UxROM;
+  int prg_mask = 0;        // in 16KB pages (UxROM); 32KB pages for AxROM
   int vram_byte_mask = 0;
-  bool chrIsRom = false;   // NROM: pattern space is CHR ROM (writes ignored)
-  // NROM has no bank register at all (NROM.cs never overrides WritePrg), and this class doubles as
-  // the NROM board: without this flag a stray write into $8000-$FFFF would bank-switch a 32KB NROM
-  // cart, which on the real machine does nothing.
-  bool prgIsFixed = false;
+  bool chrIsRom = false;   // pattern space is CHR ROM (writes ignored)
 
   //state
   int prg = 0;
@@ -207,14 +218,24 @@ class UxROM final : public NesBoardBase
     // case "NES-UNROM": AssertPrg(128); AssertChr(0); AssertVram(8);
     //these boards always have 8KB of VRAM
     vram_byte_mask = (Cart.VramSize * 1024) - 1;
-    prg_mask = (Cart.PrgSize / 16) - 1;
-    SetMirrorType(Cart.PadH, Cart.PadV);
+    if (kind == Kind::AxROM)
+    {
+      // AxROM.cs: 32KB pages, and the board powers on showing the first nametable
+      prg_mask = (Cart.PrgSize / 32) - 1;
+      SetMirrorType(EMirrorType::OneScreenA);
+    }
+    else
+    {
+      prg_mask = (Cart.PrgSize / 16) - 1;
+      SetMirrorType(Cart.PadH, Cart.PadV);
+    }
 
     return true;
   }
 
   uint8_t ReadPrg(int addr) override
   {
+    if (kind == Kind::AxROM) return Rom[addr | (prg << 15)]; // one 32KB window
     int block = addr >> 14;
     int page = block == 1 ? prg_mask : prg;
     int ofs = addr & 0x3FFF;
@@ -223,8 +244,20 @@ class UxROM final : public NesBoardBase
 
   void WritePrg(int addr, uint8_t value) override
   {
-    if (prgIsFixed) return; // NROM
-    prg = value & prg_mask; // adjust_prg is identity for NES-UNROM
+    switch (kind)
+    {
+      case Kind::NROM:
+        return; // no bank register: on the real cart these writes do nothing
+      case Kind::UxROM:
+        prg = value & prg_mask; // adjust_prg is identity for NES-UNROM
+        return;
+      case Kind::AxROM:
+        // one write does both jobs: bank in the low bits, nametable in bit 4. Bus conflicts are
+        // off, which is what NesHawk does for plain iNES mapper 7 (only ACCLAIM-AOROM sets them).
+        prg = value & prg_mask;
+        SetMirrorType((value & 0x10) == 0 ? EMirrorType::OneScreenA : EMirrorType::OneScreenB);
+        return;
+    }
   }
 
   uint8_t ReadPpu(int addr) override

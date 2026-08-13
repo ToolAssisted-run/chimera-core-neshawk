@@ -117,8 +117,10 @@ every frame.
 
 ## Limits worth knowing
 
-- **Mappers**: NROM (0) and UxROM (2) only — the two boards translated so far. Anything else is
-  rejected at load with a message, not mis-emulated.
+- **Mappers**: NROM (0), UxROM (2) and AxROM (7) only — the boards translated so far. Anything else
+  is rejected at load with a message, not mis-emulated. Adding one is a small, well-bounded job: a
+  board class in `nesBoards.hpp` transliterated from BizHawk's `Boards/*.cs`, then verified frame by
+  frame against genuine NesHawk with the oracle in [`../harness`](../harness).
 - **No Power button**: the controller has Reset (soft) but not Power, because a hard reset rebuilds
   the board and the host has already mapped the board's memory domains by pointer.
 

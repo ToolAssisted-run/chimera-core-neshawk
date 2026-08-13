@@ -385,10 +385,12 @@ void syncApu(APU& apu, Op& op)
 }
 
 template <typename Op>
-void syncBoard(UxROM& board, Op& op)
+void syncBoard(NesBoard& board, Op& op)
 {
-  // NesBoardBase.SyncState: vram, wram, mirroring (constant here), irq signal; UxROM adds prg
+  // NesBoardBase.SyncState: vram, wram, mirroring, irq signal; the board adds its bank register.
+  // Mirroring is only mutable on AxROM, but it is synced unconditionally, as in the C#.
   op.bytes(board.Vram.data(), board.Vram.size());
+  op.bytes(board._mirroring, sizeof board._mirroring);
   op(board.IrqSignal);
   op(board.prg);
 }
