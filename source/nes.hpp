@@ -119,27 +119,68 @@ class NES
 
   int64_t TotalExecutedCycles() const { return cpu->TotalExecutedCycles; }
 
+  // PPU cycle count as of the start of the current frame. cpu->ext_ppu_cycle is only materialized
+  // at frame end (runppu stopped incrementing it per cycle), so anything that wants the count
+  // MID-frame -- a tracer, say -- subtracts this instead of reading a stale field.
+  int64_t extPpuCycleBase = 0;
+  int32_t ExtPpuCycle() const { return (int32_t)(ppu->_totalCycles - extPpuCycleBase); }
+
+  // ---- machine configuration (NESSyncSettings, NES.ISettable.cs) ----
+  // Resolved before the first HardReset and fixed for the machine's life -- BizHawk reboots the
+  // core when one of these changes. The translation used to hardcode what a default-constructed
+  // NESSyncSettings gives you: NTSC, and the fceux power-on RAM pattern.
+  PPU::Region _display_type = PPU::Region::NTSC;
+  std::vector<uint8_t> initialWRamStatePattern; // empty = the fceux pattern (NES.Core.cs HardReset)
+
+  // frame rate of the resolved region, set by HardReset (NES.Core.cs VsyncNum / VsyncDen)
+  int VsyncNum = 0;
+  int VsyncDen = 0;
+
+  // NES.cs hands MOS6502X a TraceCallback; the CPU calls OnExecFetch immediately before fetching
+  // an opcode, with every register still holding the pre-instruction state, which is the moment
+  // BizHawk logs. Null unless a tracer is attached.
+  void (*traceCallback)(NES& nes, uint16_t addr) = nullptr;
+
+  // NES.Core.cs feeds a blip buffer from RunCpuOne: every change of the mixed APU output is a delta
+  // at the current sample clock. The band-limited synthesis itself is not part of this core (the
+  // source stays dependency-free), so the deltas leave through a callback and whoever wants sound
+  // owns the buffer. Only called when NESHAWK_FULL_AV is defined.
+  void (*sampleCallback)(void* ctx, uint32_t clock, int delta) = nullptr;
+  void* sampleCallbackCtx = nullptr;
+
   // ---- power-on (NES.cs Init: the iNES/NES-UNROM path, plus header-driven NROM) ----
   // romFile = full .nes file including the 16-byte iNES header.
-  NES(const uint8_t* romFile, size_t romFileSize)
+  NES(const uint8_t* romFile, size_t romFileSize,
+      PPU::Region region = PPU::Region::NTSC,
+      const uint8_t* wramPattern = nullptr, size_t wramPatternSize = 0)
   {
+    _display_type = region;
+    if (wramPattern != nullptr && wramPatternSize != 0)
+      initialWRamStatePattern.assign(wramPattern, wramPattern + wramPatternSize);
+
     if (romFileSize < 16) throw std::runtime_error("ROM file smaller than an iNES header");
     if (memcmp(romFile, "NES\x1A", 4) != 0) throw std::runtime_error("not an iNES file");
     const int mapper = (romFile[6] >> 4) | (romFile[7] & 0xF0);
     const int chr8   = romFile[5];
-    if (mapper == 0)
-    {
-      // NROM: fixed PRG (16KB mirrored via prg_mask=0, or 32KB), CHR ROM in the pattern space.
-      cart.PrgSize  = (int)romFile[4] * 16;
-      cart.VramSize = 8;
-      cart.PadH     = (romFile[6] & 1) ? 1 : 0; // flags6 bit0 set = vertical -> pads (1,0)
-      cart.PadV     = (romFile[6] & 1) ? 0 : 1; // clear = horizontal -> pads (0,1)
-      if (romFileSize < 16 + (size_t)cart.PrgSize * 1024 + (size_t)chr8 * 8 * 1024)
-        throw std::runtime_error("ROM file too small for header-declared NROM sizes");
-    }
-    else if (romFileSize < 16 + (size_t)128 * 1024) throw std::runtime_error("ROM file too small for a 128KB-PRG UNROM cart");
+    // Only the two boards translated here (NesBoardBase + UxROM, which also serves as NROM). The
+    // real NesHawk resolves the board from the BootGod DB and has a hundred more.
+    if (mapper != 0 && mapper != 2) throw std::runtime_error("unsupported mapper (only NROM and UxROM are translated)");
+    if ((romFile[6] & 4) != 0) throw std::runtime_error("trainers are not supported");
+
+    // Everything the two boards need comes out of the iNES header; NesHawk would take it from the
+    // cart database, which is also where a board type with a bus-conflict or WRAM quirk would come
+    // from. flags6 bit0 set = vertical mirroring -> pads (1,0); clear = horizontal -> (0,1).
+    cart.PrgSize  = (int)romFile[4] * 16;
+    cart.ChrSize  = chr8 * 8;
+    cart.VramSize = 8;
+    cart.PadH     = (romFile[6] & 1) ? 1 : 0;
+    cart.PadV     = (romFile[6] & 1) ? 0 : 1;
+    if (cart.PrgSize == 0) throw std::runtime_error("iNES header declares no PRG ROM");
+    if (romFileSize < 16 + (size_t)cart.PrgSize * 1024 + (size_t)chr8 * 8 * 1024)
+      throw std::runtime_error("ROM file too small for its header-declared sizes");
 
     board = std::make_unique<UxROM>();
+    board->prgIsFixed = (mapper == 0); // NROM has no bank register
     board->Cart = cart;
     board->Create(this);
     board->Configure();
@@ -150,8 +191,8 @@ class NES
     if (cart.VramSize != 0)
       board->Vram.assign((size_t)cart.VramSize * 1024, 0);
 
-    // NROM: the pattern space is CHR ROM -- load it and write-protect
-    if (mapper == 0 && chr8 > 0)
+    // CHR ROM on the cart: the pattern space is ROM -- load it and write-protect
+    if (chr8 > 0)
     {
       const uint8_t* chr = romFile + 16 + (size_t)cart.PrgSize * 1024;
       std::copy(chr, chr + (size_t)chr8 * 8 * 1024, board->Vram.begin());
@@ -168,6 +209,7 @@ class NES
   void BoardSystemHardReset()
   {
     auto newboard = std::make_unique<UxROM>();
+    newboard->prgIsFixed = board->prgIsFixed;
     newboard->Cart = cart;
     newboard->Create(this);
     newboard->Configure();
@@ -196,13 +238,39 @@ class NES
     memset(ram, 0, sizeof(ram));
     memset(CIRAM, 0, sizeof(CIRAM));
 
-    // set up region (NTSC)
+    // set up region (NES.Core.cs HardReset). VsyncNum/VsyncDen are the frame rate a frontend needs;
+    // the PAL and Dendy numbers are BizHawk's own.
     {
       auto old = std::move(apu);
-      apu = std::make_unique<APU>(this, old.get(), false);
-      ppu->setRegion(PPU::Region::NTSC);
-      cpuclockrate = 1789773;
-      cpu_sequence = cpu_sequence_NTSC;
+      switch (_display_type)
+      {
+        case PPU::Region::PAL:
+          apu = std::make_unique<APU>(this, old.get(), true);
+          ppu->setRegion(PPU::Region::PAL);
+          cpuclockrate = 1662607;
+          VsyncNum = cpuclockrate * 2;
+          VsyncDen = 66495;
+          cpu_sequence = cpu_sequence_PAL;
+          break;
+        // in bootgod, but BizHawk never resolves a cart to it -- only a region override reaches this
+        case PPU::Region::Dendy:
+          apu = std::make_unique<APU>(this, old.get(), false);
+          ppu->setRegion(PPU::Region::Dendy);
+          cpuclockrate = 1773448;
+          VsyncNum = cpuclockrate;
+          VsyncDen = 35464;
+          cpu_sequence = cpu_sequence_NTSC;
+          break;
+        default:
+          _display_type = PPU::Region::NTSC;
+          apu = std::make_unique<APU>(this, old.get(), false);
+          ppu->setRegion(PPU::Region::NTSC);
+          cpuclockrate = 1789773;
+          VsyncNum = cpuclockrate * 2;
+          VsyncDen = 59561;
+          cpu_sequence = cpu_sequence_NTSC;
+          break;
+      }
     }
 
     BoardSystemHardReset();
@@ -210,18 +278,27 @@ class NES
     // apu has some specific power up bahaviour that we will emulate here
     apu->NESHardReset();
 
-    // no SyncSettings InitialWRamStatePattern:
-    // check fceux's PowerNES and FCEU_MemoryRand function for more information:
-    // relevant games: Cybernoid; Minna no Taabou no Nakayoshi Daisakusen; Huang Di; and maybe mechanized attack
-    for (int i = 0; i < 0x800; i++)
+    if (!initialWRamStatePattern.empty())
     {
-      if ((i & 4) != 0)
+      for (int i = 0; i < 0x800; i++)
       {
-        ram[i] = 0xFF;
+        ram[i] = initialWRamStatePattern[i % initialWRamStatePattern.size()];
       }
-      else
+    }
+    else
+    {
+      // check fceux's PowerNES and FCEU_MemoryRand function for more information:
+      // relevant games: Cybernoid; Minna no Taabou no Nakayoshi Daisakusen; Huang Di; and maybe mechanized attack
+      for (int i = 0; i < 0x800; i++)
       {
-        ram[i] = 0x00;
+        if ((i & 4) != 0)
+        {
+          ram[i] = 0xFF;
+        }
+        else
+        {
+          ram[i] = 0x00;
+        }
       }
     }
 
@@ -257,7 +334,7 @@ class NES
     hardResetSignal = false; // controller.IsPressed("Power")
 
     cpu->ext_ppu_cycle = 0; // Reset this value at the beginning of each frame
-    const int64_t extPpuCycleBase = ppu->_totalCycles; // materialized at frame end (see below)
+    extPpuCycleBase = ppu->_totalCycles; // materialized at frame end (see below)
 
     if (ppu->ppudead > 0)
     {
@@ -416,7 +493,8 @@ class NES
 
     if (s != old_s)
     {
-      // (blip.AddDelta dropped -- no audio synthesis)
+      // NES.Core.cs: blip.AddDelta(apu.sampleclock, s - old_s)
+      if (sampleCallback != nullptr) sampleCallback(sampleCallbackCtx, apu->sampleclock, s - old_s);
       old_s = s;
     }
     apu->sampleclock++;
@@ -674,7 +752,12 @@ class NES
     return ret;
   }
 
-  void ExecFetch(uint16_t addr) {} // memory callbacks dropped
+  // memory callbacks dropped; the tracer hook stays because this is where BizHawk's
+  // MOS6502X.TraceCallback fires (NES.CpuLink.cs -> ExecFetch)
+  void ExecFetch(uint16_t addr)
+  {
+    if (traceCallback != nullptr) traceCallback(*this, addr);
+  }
 
   uint8_t ReadMemory(uint16_t addr)
   {
@@ -1761,7 +1844,26 @@ inline void PPU::TickPPU_active()
       // this extra bit takes care of it quickly
       soam_index_aux = 8;
 
-      // (AllowMoreThanEightSprites is false: >8-sprites scan dropped)
+      if (nesSettings::AllowMoreThanEightSprites)
+      {
+        while (oam_index_aux < 64 && soam_index_aux < 64)
+        {
+          //look for sprites
+          soam[soam_index_aux * 4] = OAM[oam_index_aux * 4];
+          if (yp >= OAM[oam_index_aux * 4] && yp < OAM[oam_index_aux * 4] + spriteHeight)
+          {
+            soam[soam_index_aux * 4 + 1] = OAM[oam_index_aux * 4 + 1];
+            soam[soam_index_aux * 4 + 2] = OAM[oam_index_aux * 4 + 2];
+            soam[soam_index_aux * 4 + 3] = OAM[oam_index_aux * 4 + 3];
+            soam_index_aux++;
+            oam_index_aux++;
+          }
+          else
+          {
+            oam_index_aux++;
+          }
+        }
+      }
 
       soam_index_prev = soam_index_aux;
 

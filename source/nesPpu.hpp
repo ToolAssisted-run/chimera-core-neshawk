@@ -6,7 +6,7 @@
 // Methods that dereference the NES (bus, cpu, board, frame flags) are declared here and defined
 // in nes.hpp: ppubus_write/read/peek, runppu, write_2007, read_2007, ReadReg, TickPPU_VBL,
 // TickPPU_preVBL, NewDeadPPU. TickPPU_active stays here: its only NES dependency was
-// nes.Settings, which is compile-time constant for us (see nesSettings below).
+// nes.Settings, which lives in the nesSettings namespace below.
 //
 // Deliberately dropped (never taken for this cart / headless use): VS-system 2c05 register swap
 // and peek_2002 special cases, light gun, NT/PPUView debug callbacks, SyncState (comes with the
@@ -23,12 +23,15 @@ namespace nesHawk
 
 class NES;
 
-// NESSettings defaults (NES.ISettable.cs): the oracle runs with a default-constructed NESSettings
+// NESSettings (NES.ISettable.cs). These were compile-time constants while the only consumer was the
+// oracle, which runs with a default-constructed NESSettings; a frontend lets the user change them
+// while the machine runs, so they are ordinary globals now with the same defaults. They are
+// settings, not machine state: nothing here belongs in a savestate.
 namespace nesSettings
 {
-constexpr bool DispBackground = true;
-constexpr bool DispSprites = true;
-constexpr bool AllowMoreThanEightSprites = false;
+inline bool DispBackground = true;
+inline bool DispSprites = true;
+inline bool AllowMoreThanEightSprites = false;
 }
 
 class PPU

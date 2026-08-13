@@ -194,6 +194,10 @@ class UxROM final : public NesBoardBase
   int prg_mask = 0;
   int vram_byte_mask = 0;
   bool chrIsRom = false;   // NROM: pattern space is CHR ROM (writes ignored)
+  // NROM has no bank register at all (NROM.cs never overrides WritePrg), and this class doubles as
+  // the NROM board: without this flag a stray write into $8000-$FFFF would bank-switch a 32KB NROM
+  // cart, which on the real machine does nothing.
+  bool prgIsFixed = false;
 
   //state
   int prg = 0;
@@ -219,6 +223,7 @@ class UxROM final : public NesBoardBase
 
   void WritePrg(int addr, uint8_t value) override
   {
+    if (prgIsFixed) return; // NROM
     prg = value & prg_mask; // adjust_prg is identity for NES-UNROM
   }
 
