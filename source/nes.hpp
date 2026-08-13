@@ -152,13 +152,23 @@ class NES
   // romFile = full .nes file including the 16-byte iNES header.
   NES(const uint8_t* romFile, size_t romFileSize,
       PPU::Region region = PPU::Region::NTSC,
-      const uint8_t* wramPattern = nullptr, size_t wramPatternSize = 0)
+      const uint8_t* wramPattern = nullptr, size_t wramPatternSize = 0,
+      const uint8_t* biosRom = nullptr, size_t biosRomSize = 0)
   {
     _display_type = region;
     if (wramPattern != nullptr && wramPatternSize != 0)
       initialWRamStatePattern.assign(wramPattern, wramPattern + wramPatternSize);
 
     if (romFileSize < 16) throw std::runtime_error("ROM file smaller than an iNES header");
+
+    // NES.cs: a disk image is not a cartridge at all - no mapper, no PRG, no CHR. Both dump shapes
+    // in circulation are accepted, headered and raw, as the board normalizes them.
+    if (memcmp(romFile, "FDS\x1A", 4) == 0 || memcmp(romFile, "\x01*NI", 4) == 0)
+    {
+      InitFds(romFile, romFileSize, biosRom, biosRomSize);
+      return;
+    }
+
     if (memcmp(romFile, "NES\x1A", 4) != 0) throw std::runtime_error("not an iNES file");
     const int mapper = (romFile[6] >> 4) | (romFile[7] & 0xF0);
     const int chr8   = romFile[5];
@@ -222,6 +232,39 @@ class NES
     HardReset();
   }
 
+  /// NES.cs's FDS branch: the BIOS and the disk go to the board, the machine is NTSC, and the
+  /// "cart" is 32KB of RAM and 8KB of VRAM with no rom of its own.
+  void InitFds(const uint8_t* image, size_t imageSize, const uint8_t* biosRom, size_t biosRomSize)
+  {
+    if (biosRom == nullptr || biosRomSize != 8192)
+      throw std::runtime_error("this is a Famicom Disk System disk image, which needs the 8192-byte "
+                               "Disk System BIOS. The package declares it as firmware named \"bios\"; "
+                               "in miniHawk, set it in Emulator > Firmware");
+
+    // NES.cs: "Using NTSC display type for FDS disk image"
+    _display_type = PPU::Region::NTSC;
+
+    cart.PrgSize = 0;
+    cart.ChrSize = 0;
+    cart.VramSize = 8;
+    cart.WramSize = 32;
+    cart.PadH = 0;
+    cart.PadV = 0;
+
+    board = std::make_unique<NesBoard>();
+    board->kind = NesBoard::Kind::FDS;
+    board->Cart = cart;
+    board->Create(this);
+    board->fds.biosrom.assign(biosRom, biosRom + biosRomSize);
+    board->fds.SetDiskImage(image, imageSize);
+    board->Vram.assign((size_t)cart.VramSize * 1024, 0);
+    board->Wram.assign((size_t)cart.WramSize * 1024, 0);
+    board->Configure(); // inserts side 0, which needs the image and the RAM to exist
+    board->PostConfigure();
+
+    HardReset();
+  }
+
   // NES.BoardSystem.cs
   void BoardSystemHardReset()
   {
@@ -229,6 +272,16 @@ class NES
     newboard->kind = board->kind;
     newboard->Cart = cart;
     newboard->Create(this);
+    if (board->kind == NesBoard::Kind::FDS)
+    {
+      // "FDS and NSF have a unique activation setup": the BIOS and the disk image move to the new
+      // board before it configures, since configuring is what puts a side in the drive. As in the
+      // C#, the image handed over is the one as loaded, so a hard reset also undoes disk writes.
+      newboard->fds.biosrom = board->fds.biosrom;
+      newboard->fds.SetDiskImage(board->fds.diskimage.data(), board->fds.diskimage.size());
+      newboard->Vram.assign(board->Vram.size(), 0);
+      newboard->Wram.assign(board->Wram.size(), 0);
+    }
     newboard->Configure();
     newboard->Rom = board->Rom;
     if (!board->Wram.empty())
@@ -901,6 +954,164 @@ inline uint8_t NesBoardBase::ReadWram(int addr)
 inline uint8_t NesBoardBase::ReadExp(int addr)
 {
   return NES_->DB;
+}
+
+// ======================= the FDS board's NES-facing half (FDS.cs) =======================
+
+inline void FdsAudio::CalcOut(APU* apu)
+{
+  int tmp = volumegain < 32 ? volumegain : 32;
+  tmp *= waveramoutput;
+  tmp *= mastervol_num;
+  tmp /= mastervol_den;
+
+  if (latchedoutput != tmp)
+  {
+    apu->ExternalQueue((tmp - latchedoutput) * 3);
+    latchedoutput = tmp;
+  }
+}
+
+inline uint8_t NesBoard::ReadExp(int addr)
+{
+  if (kind != Kind::FDS) return NES_->DB;
+
+  uint8_t ret = NES_->DB;
+
+  if (addr >= 0x0040) return fds.audio.ReadReg(addr + 0x4000, ret);
+
+  switch (addr)
+  {
+    case 0x0030:
+      if (fds.diskenable)
+      {
+        const int tmp = fds.drive.Read4030() & 0xD2;
+        ret &= 0x2C;
+        if (fds.timerirq) ret |= 1;
+        ret |= (uint8_t)tmp;
+        fds.timerirq = false;
+        fds.timer_irq_active = false;
+        SyncFdsIrq();
+      }
+      break;
+    case 0x0031:
+      if (fds.diskenable) ret = fds.drive.Read4031();
+      break;
+    case 0x0032:
+      if (fds.diskenable)
+      {
+        const int tmp = fds.drive.Read4032() & 0x47;
+        ret &= 0xB8;
+        ret |= (uint8_t)tmp;
+      }
+      break;
+    case 0x0033:
+      if (fds.diskenable)
+      {
+        ret = fds.reg4026;
+        // (the low battery flag would be `ret &= 0x7f` here)
+      }
+      break;
+  }
+  fds.diskirq = fds.drive.irq;
+  SyncFdsIrq();
+  return ret;
+}
+
+inline void NesBoard::WriteExp(int addr, uint8_t value)
+{
+  if (kind != Kind::FDS) return;
+
+  if (addr >= 0x0040)
+  {
+    fds.audio.WriteReg(addr + 0x4000, value);
+    return;
+  }
+
+  switch (addr)
+  {
+    case 0x0020:
+      fds.timerlatch &= 0xFF00;
+      fds.timerlatch |= value;
+      break;
+    case 0x0021:
+      fds.timerlatch &= 0x00FF;
+      fds.timerlatch |= value << 8;
+      break;
+    case 0x0022:
+      if (fds.diskenable)
+      {
+        fds.timerreg = (uint8_t)(value & 3);
+        if ((value & 0x02) == 0x02)
+        {
+          fds.timervalue = fds.timerlatch;
+        }
+        else
+        {
+          fds.timerirq = false;
+          fds.timer_irq_active = false;
+          SyncFdsIrq();
+        }
+      }
+      break;
+    case 0x0023:
+      fds.diskenable = (value & 1) != 0;
+      if (!fds.diskenable)
+      {
+        fds.timerirq = false;
+        fds.timer_irq_active = false;
+        SyncFdsIrq();
+      }
+      fds.soundenable = (value & 2) != 0;
+      break;
+    case 0x0024:
+      if (fds.diskenable) fds.drive.Write4024(value);
+      break;
+    case 0x0025:
+      if (fds.diskenable) fds.drive.Write4025(value);
+      SetMirrorType((value & 8) == 0 ? EMirrorType::Vertical : EMirrorType::Horizontal);
+      break;
+    case 0x0026:
+      if (fds.diskenable) fds.reg4026 = value;
+      break;
+  }
+  fds.diskirq = fds.drive.irq;
+  SyncFdsIrq();
+}
+
+inline void NesBoard::ClockCpu()
+{
+  if (kind != Kind::FDS) return;
+
+  // FDS.ClockCpu: the timer counts CPU cycles and raises its IRQ three cycles after expiring
+  if ((fds.timerreg & 2) != 0 && fds.diskenable)
+  {
+    if (fds.timervalue != 0)
+    {
+      fds.timervalue--;
+    }
+    else
+    {
+      fds.timervalue = fds.timerlatch;
+      if ((fds.timerreg & 1) == 0) fds.timerreg -= 2;
+
+      if (!fds.timer_irq_active)
+      {
+        fds.timer_irq_active = true;
+        fds.timerirq_cd = 3;
+      }
+    }
+  }
+
+  if (fds.timerirq_cd > 0) fds.timerirq_cd--;
+
+  if (fds.timerirq_cd == 0 && fds.timer_irq_active)
+  {
+    fds.timerirq = true;
+    SyncFdsIrq();
+  }
+
+  fds.audio.Clock(NES_->apu.get());
 }
 
 inline uint8_t NesBoardBase::ReadReg2xxx(int addr)

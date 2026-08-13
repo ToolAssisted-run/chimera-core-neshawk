@@ -70,7 +70,22 @@ int main(int argc, char** argv)
   size_t maxFrames = argc > 4 ? strtoull(argv[4], nullptr, 0) : inputs.size();
   if (maxFrames > inputs.size()) maxFrames = inputs.size();
 
-  nesHawk::NES nes(rom.data(), rom.size());
+  // An FDS disk image needs the disk system BIOS; the C# oracle reads the same variable, so a
+  // comparison run gets the identical machine on both sides.
+  std::vector<uint8_t> bios;
+  if (const char* biosPath = getenv("NESHAWK_FDS_BIOS"))
+  {
+    if (FILE* f = fopen(biosPath, "rb"))
+    {
+      uint8_t buf[8192];
+      const size_t n = fread(buf, 1, sizeof buf, f);
+      fclose(f);
+      bios.assign(buf, buf + n);
+    }
+  }
+
+  nesHawk::NES nes(rom.data(), rom.size(), nesHawk::PPU::Region::NTSC, nullptr, 0,
+                   bios.empty() ? nullptr : bios.data(), bios.size());
 
   FILE* out = fopen(argv[3], "wb");
   if (out == nullptr) { fprintf(stderr, "cannot open %s\n", argv[3]); return 1; }

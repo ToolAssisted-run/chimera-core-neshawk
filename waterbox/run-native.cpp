@@ -112,10 +112,17 @@ int main(int argc, char **argv)
 	uint8_t *rom = slurp(romPath, &romLen);
 	if (!rom) { fprintf(stderr, "cannot read %s\n", romPath); return 1; }
 
+	// The FDS BIOS arrives through the environment here; in the sandbox it is a mounted file the
+	// package declares as firmware. Both end up as the same 8192 bytes in the same place.
+	long biosLen = 0;
+	uint8_t *bios = nullptr;
+	if (const char *biosPath = getenv("NESHAWK_FDS_BIOS")) bios = slurp(biosPath, &biosLen);
+
 	nesHawk::NES *nes = nullptr;
 	try
 	{
-		nes = new nesHawk::NES(rom, (size_t)romLen);
+		nes = new nesHawk::NES(rom, (size_t)romLen, nesHawk::PPU::Region::NTSC, nullptr, 0,
+		                       bios ? bios : nullptr, (size_t)biosLen);
 	}
 	catch (const std::exception &e)
 	{

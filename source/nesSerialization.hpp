@@ -418,6 +418,89 @@ void syncBoard(NesBoard& board, Op& op)
   op(mmc3.separator_counter); op(mmc3.irq_countdown);
   op.bytes(mmc3.chr_regs_1k, sizeof mmc3.chr_regs_1k);
   op.bytes(mmc3.prg_regs_8k, sizeof mmc3.prg_regs_8k);
+
+  // FDS.SyncState (RamAdapter and FDSAudio included). Unlike a cartridge, the medium itself is
+  // mutable state: the game writes to the disk, so the disk goes in the state, as do the per-side
+  // diffs that carry those writes across an eject.
+  auto& fds = board.fds;
+  auto syncBytes = [&op](std::vector<uint8_t>& v)
+  {
+    uint32_t n = (uint32_t)v.size();
+    op(n);
+    v.resize(n); // a no-op when saving; the load path is what needs it
+    if (n != 0) op.bytes(v.data(), n);
+  };
+
+  auto& drive = fds.drive;
+  syncBytes(drive.originaldisk);
+  syncBytes(drive.disk);
+  op(drive.diskpos);
+  op(drive.disksize);
+  op(drive.writeprotect);
+  op(drive.cycleswaiting);
+  op(drive.state);
+  op(drive.cached4025);
+  op(drive.irq);
+  op(drive.transferreset);
+  op(drive.crc);
+  op(drive.writecomputecrc);
+  op(drive.readreg);
+  op(drive.writereg);
+  op(drive.readregpos);
+  op(drive.writeregpos);
+  op(drive.readreglatch);
+  op(drive.writereglatch);
+  op(drive.bytetransferflag);
+  op(drive.lookingforendofgap);
+
+  auto& audio = fds.audio;
+  op.bytes(audio.waveram, sizeof audio.waveram);
+  op(audio.waverampos);
+  op(audio.volumespd);
+  op(audio.r4080_6);
+  op(audio.r4080_7);
+  op(audio.frequency);
+  op(audio.r4083_6);
+  op(audio.r4083_7);
+  op(audio.sweepspd);
+  op(audio.r4084_6);
+  op(audio.r4084_7);
+  op(audio.sweepbias);
+  op(audio.modfreq);
+  op(audio.r4087_7);
+  op.bytes(audio.modtable, sizeof audio.modtable);
+  op(audio.modtablepos);
+  op(audio.mastervol_num);
+  op(audio.mastervol_den);
+  op(audio.waveram_writeenable);
+  op(audio.envspeed);
+  op(audio.volumeclock);
+  op(audio.sweepclock);
+  op(audio.modclock);
+  op(audio.mainclock);
+  op(audio.modoutput);
+  op(audio.volumegain);
+  op(audio.sweepgain);
+  op(audio.waveramoutput);
+  op(audio.latchedoutput);
+
+  op(fds.currentside);
+  {
+    uint32_t sides = (uint32_t)fds.diskdiffs.size();
+    op(sides);
+    fds.diskdiffs.resize(sides);
+    for (auto& diff : fds.diskdiffs) syncBytes(diff);
+  }
+  op(fds.timerirq);
+  op(fds.timer_irq_active);
+  op(fds.timerirq_cd);
+  op(fds.diskirq);
+  op(fds.diskenable);
+  op(fds.soundenable);
+  op(fds.reg4026);
+  op(fds.timerlatch);
+  op(fds.timervalue);
+  op(fds.timerreg);
 }
 
 } // namespace detail

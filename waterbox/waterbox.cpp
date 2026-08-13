@@ -180,10 +180,11 @@ namespace
 		((audio::BandLimitedResampler<MaxSamplesPerFrame> *)ctx)->AddDelta(clock, delta);
 	}
 
-	// Reads the whole mounted "rom" file (caller frees).
-	uint8_t *readRom(uint32_t *outLen)
+	// Reads a whole mounted file (caller frees). Null if it is not mounted at all - which is how a
+	// firmware file the user has not provided shows up, since the host only mounts what it has.
+	uint8_t *readMounted(const char *name, uint32_t *outLen)
 	{
-		FILE *f = fopen("rom", "rb");
+		FILE *f = fopen(name, "rb");
 		if (!f) return nullptr;
 		fseek(f, 0, SEEK_END);
 		long n = ftell(f);
@@ -238,8 +239,14 @@ extern "C"
 ECL_EXPORT int Init(void)
 {
 	uint32_t romLen = 0;
-	uint8_t *rom = readRom(&romLen);
+	uint8_t *rom = readMounted("rom", &romLen);
 	if (!rom) return 0;
+
+	/* The disk system BIOS, declared as firmware in waterbox.config and mounted by the frontend
+	 * under that id. A cartridge never asks for it, so its absence is only an error for a disk
+	 * image - and that error comes from the core, which is the part that knows. */
+	uint32_t biosLen = 0;
+	uint8_t *bios = readMounted("bios", &biosLen);
 
 	// sync settings: everything that shapes the machine, read once (NESSyncSettings)
 	const nesHawk::PPU::Region region = parseRegion();
@@ -253,15 +260,18 @@ ECL_EXPORT int Init(void)
 	// which here means Init fails and the frontend says so, rather than emulating nonsense.
 	try
 	{
-		g_nes = new nesHawk::NES(rom, romLen, region, wramPatternLen != 0 ? wramPattern : nullptr, (size_t)wramPatternLen);
+		g_nes = new nesHawk::NES(rom, romLen, region, wramPatternLen != 0 ? wramPattern : nullptr, (size_t)wramPatternLen,
+		                         bios, (size_t)biosLen);
 	}
 	catch (const std::exception &e)
 	{
 		printf("QuickerNesHawk: cannot load this rom: %s\n", e.what());
 		free(rom);
+		free(bios);
 		return 0;
 	}
 	free(rom);
+	free(bios);
 
 	g_nes->controllerDeck._port2Connected = g_port2 == portGamepad;
 
@@ -299,14 +309,33 @@ ECL_EXPORT void PutSettings(int length)
  *   bits  0-7  P1
  *   bits  8-15 P2 (latched only when port 2 has a pad plugged in)
  *   bit  16    Reset
+ *   bit  17    FDS Eject
+ *   bits 18-21 FDS Insert 0..3
  * There is no Power button: a hard reset rebuilds the board, and the host has already mapped the
- * board's memory domains by pointer. */
+ * board's memory domains by pointer.
+ *
+ * The disk buttons are declared for every rom because a package's controller is fixed, and are
+ * inert unless a disk system image is loaded. NesHawk declares one Insert per side of the mounted
+ * image; four covers every commercial disk, and asking for a side the image does not have does
+ * nothing rather than failing. */
 ECL_EXPORT void FrameAdvance(uint64_t input)
 {
 	const uint8_t pad1 = g_port1 == portGamepad ? (uint8_t)(input & 0xFF) : 0;
 	const uint8_t pad2 = g_port2 == portGamepad ? (uint8_t)((input >> 8) & 0xFF) : 0;
 
 	g_nes->resetSignal = (input >> 16) & 1;
+
+	// NES.Core.cs FrameAdvance: the drive is worked before the frame runs, and both buttons are
+	// level triggered - holding Insert re-seats the disk every frame, as it does in NesHawk.
+	if (g_nes->board->kind == nesHawk::NesBoard::Kind::FDS)
+	{
+		auto &fds = g_nes->board->fds;
+		if ((input >> 17) & 1) fds.Eject();
+		for (int side = 0; side < 4 && side < fds.NumSides(); side++)
+		{
+			if ((input >> (18 + side)) & 1) fds.InsertSide(side);
+		}
+	}
 	g_nes->FrameAdvance(pad1, pad2);
 
 	// Video: NesHawk's own framebuffer walk (NES.cs MyVideoProvider.FillFrameBuffer). xbuf holds a

@@ -1048,6 +1048,18 @@ class APU
   int cart_sound = 0;
   int old_cart_sound = 0;
 
+  /// APU.ExternalQueue: where a cart's own sound enters the mix. "only call in board.ClockCPU()"
+  void ExternalQueue(int value)
+  {
+    cart_sound = value + old_cart_sound;
+
+    if (cart_sound != old_cart_sound)
+    {
+      recalculate = true;
+      old_cart_sound = cart_sound;
+    }
+  }
+
   int EmitSample()
   {
     if (recalculate)

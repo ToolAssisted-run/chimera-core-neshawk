@@ -118,8 +118,8 @@ every frame.
 ## Limits worth knowing
 
 - **Mappers**: the boards translated so far are NROM (0), SxROM/MMC1 (1), UxROM (2), CNROM (3),
-  TxROM/MMC3 (4), AxROM (7), GxROM (66) and mapper 70 - 69 of the 79 roms in the reference
-  collection. Anything else is rejected at load with a message, not mis-emulated. Adding one is a small, well-bounded job: transliterate the board from BizHawk's
+  TxROM/MMC3 (4), AxROM (7), GxROM (66), mapper 70 and the Famicom Disk System - 69 of the 79 roms
+  in the reference collection, plus any disk image. Anything else is rejected at load with a message, not mis-emulated. Adding one is a small, well-bounded job: transliterate the board from BizHawk's
   `Boards/*.cs` into `nesBoards.hpp`, accept its mapper number in the NES constructor, and verify it
   frame by frame against genuine NesHawk with the oracle in [`../harness`](../harness).
 - **No cart database.** NesHawk resolves the board from BootGod's database keyed by rom hash, and
@@ -129,6 +129,33 @@ every frame.
   into the core.
 - **No Power button**: the controller has Reset (soft) but not Power, because a hard reset rebuilds
   the board and the host has already mapped the board's memory domains by pointer.
+- **Disk writes do not outlive the session.** A disk system game writes to its disk, and those
+  writes are machine state here: they are in savestates and survive an eject, but there is no
+  save-file channel in the package ABI, so quitting loses them. NesHawk keeps them in a `.sav`
+  through its SaveRam interface. This is an ABI gap, not an emulation one.
+
+## The Famicom Disk System
+
+A disk image is not a cartridge: the machine is the RAM adapter, which maps its own 8 KiB BIOS at
+`$E000`, 32 KiB of RAM under it, and a disk drive and an extra sound channel at `$4020-$40FF`. All
+three are translated - `FDS.cs` into the board (`Kind::FDS`), `RamAdapter.cs` and `FDSAudio.cs` into
+[`nesFds.hpp`](../source/nesFds.hpp).
+
+The drive is modelled at the bit level and clocked by the PPU: the disk is a stream of bits passing
+under a fixed head at ~96.4 kHz, which the BIOS reads through a shift register. Circulating `.fds`
+dumps are file-system level - gaps, block markers and CRCs stripped - so the physical layout is
+rebuilt on insert, exactly as NesHawk does it. Both dump shapes load, headered and raw.
+
+- **The BIOS is firmware the package declares** (`"firmware": [{ "id": "bios", ... }]`) and the
+  frontend mounts it under that id, like the rom. It is declared optional, because a cartridge does
+  not need it; a disk image without it is refused by the core with a message saying so.
+- **Disk buttons**: `FDS Eject` and `FDS Insert 0..3`. NesHawk declares one Insert per side of the
+  loaded image; a package's controller is fixed, so four are always declared and the ones the image
+  has no side for do nothing. Both are level triggered, as in NesHawk - holding Insert re-seats the
+  disk every frame.
+- **Verified** the same way as every board: `Ai Senshi Nicol` is byte-identical to genuine NesHawk
+  over 5400 frames (90 seconds, which is well past the disk load), and the sandbox gate passes on
+  it at 1800 frames including per-frame savestate round-trips.
 
 ## Audio
 

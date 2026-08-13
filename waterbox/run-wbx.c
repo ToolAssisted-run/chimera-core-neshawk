@@ -7,6 +7,9 @@
  * --rerecord round-trips the WHOLE guest machine through the host's save/load state around every
  *   frame; the digests must be identical either way.
  * --blank holds every button released, matching run-native --blank.
+ * NESHAWK_FDS_BIOS, when set, is mounted as the "bios" firmware file the package declares - the
+ * same channel the frontend uses, so a disk image runs here too.
+ *
  * --settings mounts a settings JSON exactly as the frontend does, so a sync setting can be
  *   exercised without one.
  */
@@ -124,6 +127,18 @@ int main(int argc, char **argv)
 	wbx_mount_file(h, "settings", mem_reader, (uintptr_t)&sr, false, &r);
 	if (r.error_message[0]) { fprintf(stderr, "mount settings: %s\n", r.error_message); return 1; }
 
+	/* Firmware, mounted under the id the package declares. Only mounted when the user has it: an
+	 * absent file must look absent to the guest, not empty. */
+	const char *biosPath = getenv("NESHAWK_FDS_BIOS");
+	long biosLen = 0;
+	uint8_t *bios = biosPath ? slurp(biosPath, &biosLen) : 0;
+	memreader br = { bios, (size_t)biosLen, 0 };
+	if (bios)
+	{
+		wbx_mount_file(h, "bios", mem_reader, (uintptr_t)&br, false, &r);
+		if (r.error_message[0]) { fprintf(stderr, "mount bios: %s\n", r.error_message); return 1; }
+	}
+
 	wbx_activate_host(h, &r);
 	intfn Init = (intfn)proc(h, "Init");
 	if (Init() != 1) { fprintf(stderr, "Init failed (bad rom?)\n"); return 1; }
@@ -182,8 +197,12 @@ int main(int argc, char **argv)
 	printf("audioHash=%016llx\n", (unsigned long long)ah);
 	printf("lagFrames=%ld\n", lag);
 	for (int i = 0; i < nd; i++) {
+		/* the domain list may have holes - a board with no PRG ROM (the disk system) leaves that
+		 * index empty - and an absent domain is not a domain, so it is not reported */
+		const char *dname = (const char *)GetMemoryDomainName(i);
+		if (!dname) continue;
 		uint64_t dh = fnv(0, (const void *)GetMemoryDomainPtr(i), (size_t)GetMemoryDomainSize(i));
-		printf("domain[%s]=%016llx\n", (const char *)GetMemoryDomainName(i), (unsigned long long)dh);
+		printf("domain[%s]=%016llx\n", dname, (unsigned long long)dh);
 	}
 
 	wbx_deactivate_host(h, &r); wbx_destroy_host(h, &r);

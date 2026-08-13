@@ -15,7 +15,10 @@
 
 #include <cstdint>
 #include <cstring>
+#include <stdexcept>
 #include <vector>
+
+#include "nesFds.hpp"
 
 namespace nesHawk
 {
@@ -205,6 +208,7 @@ class NesBoardBase
 //   GxROM (mapper 66, GxROM.cs)                - 32KB PRG and 8KB CHR from one write
 //   SxROM (mapper 1,  SxROM.cs)                - MMC1: five writes shift into one register
 //   TxROM (mapper 4,  TxROM.cs + MMC3.cs)      - MMC3: eight bank registers and the A12 scanline IRQ
+//   FDS   (FDS.cs + RamAdapter.cs)             - the disk system: BIOS, 32KB RAM, a drive and a timer
 class NesBoard final : public NesBoardBase
 {
   public:
@@ -219,6 +223,79 @@ class NesBoard final : public NesBoardBase
     GxROM,
     SxROM,
     TxROM,
+    FDS,
+  };
+
+  /// FDS (FDS.cs). Not a cartridge at all: the RAM adapter maps the disk system's BIOS at $E000,
+  /// 32KB of RAM under it, and its own registers at $4020-$40FF, through which the BIOS drives the
+  /// disk (see FdsDrive) and the extra sound channel (see FdsAudio). The disk image is state - the
+  /// game writes to it - so it is carried here and saved with the machine.
+  struct Fds
+  {
+    std::vector<uint8_t> biosrom;   // 8192 bytes, supplied by the user
+    std::vector<uint8_t> diskimage; // "FDS\x1A" header + 65500 bytes per side
+    FdsDrive drive;
+    FdsAudio audio;
+    /// currently loaded side of the image, 0 based; -1 is C#'s null (nothing in the drive)
+    int currentside = -1;
+    /// per side, the difference from the image as loaded (how a disk write survives an eject)
+    std::vector<std::vector<uint8_t>> diskdiffs;
+
+    bool diskirq = false;
+    bool timerirq = false;
+    /// disk io ports enabled; see 4023.0
+    bool diskenable = false;
+    /// sound io ports enabled; see 4023.1
+    bool soundenable = false;
+    /// read on 4033, write on 4026
+    uint8_t reg4026 = 0;
+
+    int timerlatch = 0; // timer reload
+    int timervalue = 0; // timer current value
+    uint8_t timerreg = 0; // 4022.0,1
+    int timerirq_cd = 0;
+    bool timer_irq_active = false;
+
+    int NumSides() const { return diskimage.empty() ? 0 : diskimage[4]; }
+
+    /// "each FDS format is worse than the last": a headerless dump gets the header it should have
+    /// had, so everything downstream can assume one.
+    void SetDiskImage(const uint8_t* image, size_t length)
+    {
+      if (length >= 4 && memcmp(image, "\x01*NI", 4) == 0)
+      {
+        const int nsides = (int)(length / 65500);
+        diskimage.assign(16, 0);
+        memcpy(diskimage.data(), "FDS\x1A", 4);
+        diskimage[4] = (uint8_t)nsides;
+        diskimage.insert(diskimage.end(), image, image + length);
+      }
+      else
+      {
+        diskimage.assign(image, image + length);
+      }
+      diskdiffs.assign((size_t)NumSides(), {});
+    }
+
+    void Eject()
+    {
+      if (currentside >= 0)
+      {
+        diskdiffs[(size_t)currentside] = drive.MakeDiff();
+        drive.Eject();
+        currentside = -1;
+      }
+    }
+
+    void InsertSide(int side)
+    {
+      if (side >= NumSides()) throw std::runtime_error("FDS: no such disk side");
+      const size_t offset = 16 + (size_t)side * 65500;
+      if (offset + 65500 > diskimage.size()) throw std::runtime_error("FDS: disk image is short a side");
+      drive.InsertBrokenImage(diskimage.data() + offset, 65500, false);
+      if (!diskdiffs[(size_t)side].empty()) drive.ApplyDiff(diskdiffs[(size_t)side]);
+      currentside = side;
+    }
   };
 
   /// MMC3 (MMC3.cs + TxROM.cs). Eight bank registers written through a two-address protocol, and a
@@ -444,6 +521,7 @@ class NesBoard final : public NesBoardBase
   int chr = 0;
   MMC1 mmc1;               // SxROM only
   MMC3 mmc3;               // TxROM only
+  Fds fds;                 // FDS only
   int chr_bank_mask = 0;   // in 4KB pages, for MMC1
   int chr_bank_mask_1k = 0;// in 1KB pages, for MMC3
   int prg_bank_mask_8k = 0;// in 8KB pages, for MMC3
@@ -451,6 +529,14 @@ class NesBoard final : public NesBoardBase
 
   bool Configure() override
   {
+    if (kind == Kind::FDS)
+    {
+      // FDS.Configure: no PRG or CHR to mask - what the CPU sees is BIOS, RAM and drive registers.
+      // The BIOS is checked in the NES constructor, which is where it arrives.
+      vram_byte_mask = (Cart.VramSize * 1024) - 1;
+      fds.InsertSide(0);
+      return true;
+    }
     // case "NES-UNROM": AssertPrg(128); AssertChr(0); AssertVram(8);
     //these boards always have 8KB of VRAM
     vram_byte_mask = (Cart.VramSize * 1024) - 1;
@@ -495,10 +581,21 @@ class NesBoard final : public NesBoardBase
 
   /// SxROM counts PPU clocks to reject writes that arrive too close together; MMC3 counts them to
   /// time its scanline IRQ.
-  bool WantsPpuClock() const override { return kind == Kind::SxROM || kind == Kind::TxROM; }
+  bool WantsPpuClock() const override
+  {
+    return kind == Kind::SxROM || kind == Kind::TxROM || kind == Kind::FDS;
+  }
 
   void ClockPpu() override
   {
+    if (kind == Kind::FDS)
+    {
+      // FDS.ClockPpu: the drive runs off the PPU clock, and every bit it moves can raise the IRQ
+      fds.drive.Clock();
+      fds.diskirq = fds.drive.irq;
+      SyncFdsIrq();
+      return;
+    }
     if (kind == Kind::SxROM)
     {
       if (mmc1.ppuclock < MMC1::PpuTimeout) mmc1.ppuclock++;
@@ -519,6 +616,17 @@ class NesBoard final : public NesBoardBase
     mmc3.just_cleared = mmc3.just_cleared_pending;
     mmc3.just_cleared_pending = false;
   }
+
+  /// FDS.SetIRQ: either source raises the same line
+  void SyncFdsIrq() { IrqSignal = fds.diskirq || fds.timerirq; }
+
+  // The FDS registers live at $4020-$40FF and its timer is clocked by the CPU. All three need
+  // NES (the data bus, the APU's external audio input), so their bodies are in nes.hpp with the
+  // other out-of-line board methods. Nothing else here overrides them: on a cartridge, $4020-$5FFF
+  // reads open bus, which is what NesBoardBase does.
+  uint8_t ReadExp(int addr) override;
+  void WriteExp(int addr, uint8_t value) override;
+  void ClockCpu() override;
 
   /// MMC3.AddressPPU: the counter is clocked by A12 going high, with a filter that ignores rises
   /// closer together than 15 PPU cycles. MMC3 cannot see the internal pattern tables (fixes Recca).
@@ -575,6 +683,9 @@ class NesBoard final : public NesBoardBase
         return Rom[((mmc1.PrgBank(addr) & prg_mask) << 14) | (addr & 0x3FFF)];
       case Kind::TxROM:
         return Rom[((mmc3.PrgBank8k(addr) & prg_bank_mask_8k) << 13) | (addr & 0x1FFF)];
+      case Kind::FDS:
+        // FDS.ReadPrg: the BIOS is the top 8KB ($E000-$FFFF); the rest is the adapter's own RAM
+        return addr >= 0x6000 ? fds.biosrom[addr & 0x1FFF] : Wram[(size_t)addr + 0x2000];
       default:
       {
         int block = addr >> 14;
@@ -589,6 +700,10 @@ class NesBoard final : public NesBoardBase
   {
     switch (kind)
     {
+      case Kind::FDS:
+        // writes land in the adapter's RAM, except over the BIOS, which is rom
+        if (addr < 0x6000) Wram[(size_t)addr + 0x2000] = value;
+        return;
       case Kind::NROM:
         return; // no bank register: on the real cart these writes do nothing
       case Kind::UxROM:
@@ -676,6 +791,14 @@ class NesBoard final : public NesBoardBase
     int bank_1k = mmc3.ChrBank1k(addr);
     bank_1k %= chr_bank_mask_1k + 1;
     return (bank_1k << 10) | (addr & 0x3FF);
+  }
+
+  /// FDS.PeekCart: "lazy" - below $6000 a peek would go through the drive registers, and reading
+  /// those acknowledges flags, so a debugger looking at the bus would change what it is looking at.
+  uint8_t PeekCart(int addr) override
+  {
+    if (kind == Kind::FDS && addr < 0x6000) return 0;
+    return NesBoardBase::PeekCart(addr);
   }
 
   uint8_t ReadPpu(int addr) override

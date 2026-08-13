@@ -85,6 +85,14 @@ int main(int argc, char **argv)
 
 	memreader mr = { rom, (size_t)romLen, 0 };
 	wbx_mount_file(h, "rom", mem_reader, (uintptr_t)&mr, false, &r);
+
+	/* firmware, when the caller has it: NESHAWK_FDS_BIOS is mounted under the id the package
+	 * declares, so the tooling of a disk system game can be looked at too */
+	const char *biosPath = getenv("NESHAWK_FDS_BIOS");
+	long biosLen = 0;
+	uint8_t *bios = biosPath ? slurp(biosPath, &biosLen) : 0;
+	memreader br = { bios, (size_t)biosLen, 0 };
+	if (bios) wbx_mount_file(h, "bios", mem_reader, (uintptr_t)&br, false, &r);
 	if (r.error_message[0]) { fprintf(stderr, "mount: %s\n", r.error_message); return 1; }
 
 	wbx_activate_host(h, &r);

@@ -22,7 +22,17 @@ namespace NesHawkOracle
 		public string GetRetroSaveRAMDirectory(string corePath) => throw new NotSupportedException();
 		public string GetRetroSystemPath(string corePath) => throw new NotSupportedException();
 		public string GetUserPath(string sysID, bool temp) => Path.GetTempPath();
-		public byte[] GetFirmware(FirmwareID id, string msg = null) => null;
+		/// <summary>
+		/// The one firmware this harness can hand over: the FDS BIOS, from
+		/// NESHAWK_FDS_BIOS. A disk image will not load without it, and no other
+		/// firmware is involved in anything NesHawk emulates here.
+		/// </summary>
+		public byte[] GetFirmware(FirmwareID id, string msg = null)
+		{
+			if (id.System != "NES" || id.Firmware != "Bios_FDS") return null;
+			var path = Environment.GetEnvironmentVariable("NESHAWK_FDS_BIOS");
+			return path is not null && File.Exists(path) ? File.ReadAllBytes(path) : null;
+		}
 		public byte[] GetFirmwareOrThrow(FirmwareID id, string msg = null) => throw new NotSupportedException();
 		public (byte[] FW, GameInfo Game) GetFirmwareWithGameInfoOrThrow(FirmwareID id, string msg = null) => throw new NotSupportedException();
 	}
