@@ -164,8 +164,20 @@ class NES
     const int chr8   = romFile[5];
     // Only the boards translated here (see NesBoard). The real NesHawk resolves the board from the
     // BootGod DB and has a hundred more.
-    if (mapper != 0 && mapper != 2 && mapper != 7)
-      throw std::runtime_error("unsupported mapper (only NROM, UxROM and AxROM are translated)");
+    // The boards translated here (see NesBoard). The real NesHawk resolves a board from the BootGod
+    // DB and has a hundred more; each one added here is a transliteration of its Boards/*.cs.
+    NesBoard::Kind kind;
+    switch (mapper)
+    {
+      case 0:  kind = NesBoard::Kind::NROM;  break;
+      case 1:  kind = NesBoard::Kind::SxROM; break;
+      case 2:  kind = NesBoard::Kind::UxROM; break;
+      case 3:  kind = NesBoard::Kind::CNROM; break;
+      case 7:  kind = NesBoard::Kind::AxROM; break;
+      case 66: kind = NesBoard::Kind::GxROM; break;
+      case 70: kind = NesBoard::Kind::B74x;  break;
+      default: throw std::runtime_error("unsupported mapper (this translation has NROM, SxROM, UxROM, CNROM, AxROM, GxROM and mapper 70)");
+    }
     if ((romFile[6] & 4) != 0) throw std::runtime_error("trainers are not supported");
 
     // Everything the two boards need comes out of the iNES header; NesHawk would take it from the
@@ -173,7 +185,8 @@ class NES
     // from. flags6 bit0 set = vertical mirroring -> pads (1,0); clear = horizontal -> (0,1).
     cart.PrgSize  = (int)romFile[4] * 16;
     cart.ChrSize  = chr8 * 8;
-    cart.VramSize = 8;
+    cart.VramSize = chr8 != 0 ? 0 : 8; // CHR ROM or CHR RAM, never both
+    cart.WramSize = 8;                 // NES.iNES.cs: "should be data[8], but that never worked"
     cart.PadH     = (romFile[6] & 1) ? 1 : 0;
     cart.PadV     = (romFile[6] & 1) ? 0 : 1;
     if (cart.PrgSize == 0) throw std::runtime_error("iNES header declares no PRG ROM");
@@ -181,9 +194,7 @@ class NES
       throw std::runtime_error("ROM file too small for its header-declared sizes");
 
     board = std::make_unique<NesBoard>();
-    board->kind = mapper == 0 ? NesBoard::Kind::NROM
-      : mapper == 2 ? NesBoard::Kind::UxROM
-      : NesBoard::Kind::AxROM;
+    board->kind = kind;
     board->Cart = cart;
     board->Create(this);
     board->Configure();
@@ -193,13 +204,15 @@ class NES
     //create the vram and wram if necessary
     if (cart.VramSize != 0)
       board->Vram.assign((size_t)cart.VramSize * 1024, 0);
+    if (cart.WramSize != 0)
+      board->Wram.assign((size_t)cart.WramSize * 1024, 0);
 
-    // CHR ROM on the cart: the pattern space is ROM -- load it and write-protect
+    // CHR ROM on the cart goes in Vrom (NesBoardBase distinguishes the two: Vram is writable
+    // pattern memory, Vrom is the cartridge's own, and the banking boards index all of it)
     if (chr8 > 0)
     {
       const uint8_t* chr = romFile + 16 + (size_t)cart.PrgSize * 1024;
-      std::copy(chr, chr + (size_t)chr8 * 8 * 1024, board->Vram.begin());
-      board->chrIsRom = true;
+      board->Vrom.assign(chr, chr + (size_t)chr8 * 8 * 1024);
     }
 
     board->PostConfigure();
@@ -219,17 +232,13 @@ class NES
     newboard->Rom = board->Rom;
     if (!board->Wram.empty())
       newboard->Wram.assign(board->Wram.size(), 0);
-    if (!board->Vram.empty())
-    {
-      if (board->chrIsRom) newboard->Vram = board->Vram;   // CHR ROM content survives reset
-      else newboard->Vram.assign(board->Vram.size(), 0);
-      newboard->chrIsRom = board->chrIsRom;
-    }
+    if (!board->Vram.empty()) newboard->Vram.assign(board->Vram.size(), 0);
+    newboard->Vrom = board->Vrom;   // cartridge CHR survives a reset
     newboard->PostConfigure();
     // (no battery SaveRam on this cart)
 
     board = std::move(newboard);
-    // (PPU::HasClockPPU is compile-time false: UxROM does not override ClockPpu)
+    ppu->HasClockPPU = board->WantsPpuClock();
   }
 
   void HardReset()

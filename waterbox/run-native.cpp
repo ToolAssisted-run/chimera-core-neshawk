@@ -84,7 +84,8 @@ namespace
 			{ "OAM", nes.ppu->OAM, 256 },
 		};
 		if (!board.Rom.empty()) d.push_back({ "PRG ROM", board.Rom.data(), board.Rom.size() });
-		if (!board.Vram.empty()) d.push_back({ board.chrIsRom ? "CHR VROM" : "VRAM", board.Vram.data(), board.Vram.size() });
+		if (!board.Vrom.empty()) d.push_back({ "CHR VROM", board.Vrom.data(), board.Vrom.size() });
+		else if (!board.Vram.empty()) d.push_back({ "VRAM", board.Vram.data(), board.Vram.size() });
 		if (!board.Wram.empty()) d.push_back({ "WRAM", board.Wram.data(), board.Wram.size() });
 		return d;
 	}

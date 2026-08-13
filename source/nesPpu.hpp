@@ -40,7 +40,10 @@ class PPU
 
   int cpu_step = 0, cpu_stepcounter = 0;
 
-  static constexpr bool HasClockPPU = false; // UxROM does not override ClockPpu (compile-time: kills a per-cycle branch)
+  // Set by the board when it counts PPU cycles (MMC1 does, to ignore writes that arrive within
+  // four clocks of each other). A plain bool rather than the old compile-time false: the branch is
+  // perfectly predicted, and the alternative is one board per binary.
+  bool HasClockPPU = false;
 
   // this only handles region differences within the PPU
   int preNMIlines = 0;

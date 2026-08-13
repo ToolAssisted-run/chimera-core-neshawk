@@ -117,10 +117,16 @@ every frame.
 
 ## Limits worth knowing
 
-- **Mappers**: NROM (0), UxROM (2) and AxROM (7) only — the boards translated so far. Anything else
-  is rejected at load with a message, not mis-emulated. Adding one is a small, well-bounded job: a
-  board class in `nesBoards.hpp` transliterated from BizHawk's `Boards/*.cs`, then verified frame by
-  frame against genuine NesHawk with the oracle in [`../harness`](../harness).
+- **Mappers**: the boards translated so far are SxROM/MMC1 (1), NROM (0), UxROM (2), CNROM (3),
+  AxROM (7), GxROM (66) and mapper 70. Anything else is rejected at load with a message, not
+  mis-emulated. Adding one is a small, well-bounded job: transliterate the board from BizHawk's
+  `Boards/*.cs` into `nesBoards.hpp`, accept its mapper number in the NES constructor, and verify it
+  frame by frame against genuine NesHawk with the oracle in [`../harness`](../harness).
+- **No cart database.** NesHawk resolves the board from BootGod's database keyed by rom hash, and
+  falls back to the iNES header; this translation only has the header. Where a dump's header lies
+  (Mega Man's says mapper 66, the database says UNROM) NesHawk is right and this is not, so such a
+  rom needs its board corrected by hand - or, eventually, a generated hash-to-board table compiled
+  into the core.
 - **No Power button**: the controller has Reset (soft) but not Power, because a hard reset rebuilds
   the board and the host has already mapped the board's memory domains by pointer.
 

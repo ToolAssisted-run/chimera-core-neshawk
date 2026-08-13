@@ -216,12 +216,14 @@ namespace
 				if (board.Rom.empty()) return false;
 				*data = board.Rom.data(); *size = (int)board.Rom.size(); *name = "PRG ROM"; return true;
 			case 5:
+				// NesHawk publishes these as two domains, and so does the board: Vrom is the
+				// cartridge's own CHR, Vram is writable pattern memory. A cart has one or the other.
+				if (!board.Vrom.empty())
+				{
+					*data = board.Vrom.data(); *size = (int)board.Vrom.size(); *name = "CHR VROM"; return true;
+				}
 				if (board.Vram.empty()) return false;
-				*data = board.Vram.data(); *size = (int)board.Vram.size();
-				// the translated board keeps cartridge CHR in the same array as CHR RAM, told apart
-				// by chrIsRom; NesHawk names them differently, so keep both names
-				*name = board.chrIsRom ? "CHR VROM" : "VRAM";
-				return true;
+				*data = board.Vram.data(); *size = (int)board.Vram.size(); *name = "VRAM"; return true;
 			case 6:
 				if (board.Wram.empty()) return false;
 				*data = board.Wram.data(); *size = (int)board.Wram.size(); *name = "WRAM"; return true;
