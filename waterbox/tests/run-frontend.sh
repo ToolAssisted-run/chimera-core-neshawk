@@ -173,20 +173,20 @@ for rom in "${roms[@]}"; do
 		--saveram-out "$bundle_dir/$name.sram" > /dev/null 2>&1; then
 		report "$name:bundle" FAIL "could not get a save file out of the core"
 	else
-		python3 "$here/compose-bundle.py" "$bundle_dir/$name.bundle" "$work/$name.battery.nes" \
+		python3 "$here/compose-bundle.py" "$bundle_dir/$name.gameBundle" "$work/$name.battery.nes" \
 			"QuickerNesHawk" "sram" "$bundle_dir/$name.sram"
 		before="$(sha1sum "$bundle_dir/$name.sram" | cut -d' ' -f1)"
-		saved_rom="$rom"; rom="$bundle_dir/$name.bundle"
-		if run_frontend "$name.bundle" "$work/config.$name.ini" 60; then
-			if grep -q "not loaded" "$work/$name.bundle.log"; then
+		saved_rom="$rom"; rom="$bundle_dir/$name.gameBundle"
+		if run_frontend "$name.gameBundle" "$work/config.$name.ini" 60; then
+			if grep -q "not loaded" "$work/$name.gameBundle.log"; then
 				report "$name:bundle" FAIL "the core refused what the bundle named"
-			elif ! python3 "$here/check-bundle.py" "$bundle_dir/$name.bundle" "$before"; then
+			elif ! python3 "$here/check-bundle.py" "$bundle_dir/$name.gameBundle" "$before"; then
 				report "$name:bundle" FAIL "the bundle was not written back on close"
 			else
 				report "$name:bundle" PASS "loaded from a bundle, written back to it, re-pinned"
 			fi
 		else
-			report "$name:bundle" FAIL "run did not report OK (see tests/work/$name.bundle.log)"
+			report "$name:bundle" FAIL "run did not report OK (see tests/work/$name.gameBundle.log)"
 		fi
 		rom="$saved_rom"
 	fi
