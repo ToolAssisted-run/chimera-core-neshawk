@@ -41,7 +41,9 @@ digests() { grep -E '^(frames|videoHash|audioHash|lagFrames|domain\[)'; }
 
 ok=0
 failed=0
-report() { printf "%-28s %-9s %s\n" "$1" "$2" "$3"; case "$2" in PASS) ok=$((ok+1)) ;; *) failed=$((failed+1)) ;; esac; }
+# SKIP counts as neither: a check that does not apply to this rom (a cart with no save file) is not
+# a pass to brag about and not a failure to fix.
+report() { printf "%-28s %-9s %s\n" "$1" "$2" "$3"; case "$2" in PASS) ok=$((ok+1)) ;; SKIP) ;; *) failed=$((failed+1)) ;; esac; }
 
 printf "%-28s %-9s %s\n" "Check" "Result" "Detail"
 printf "%-28s %-9s %s\n" "-----" "------" "------"
@@ -71,6 +73,25 @@ for rom in "${roms[@]}"; do
 		report "$name:savestate" PASS "per-frame round-trip is lossless"
 	else
 		report "$name:savestate" FAIL "$(diff "$work/box.txt" "$work/rr.txt" | tr '\n' ' ' | head -c 120)"
+	fi
+
+	# Save files, when the machine has one: what the core writes out has to be what a fresh machine
+	# takes back in. A disk or a battery cart that reloaded a save differently would lose the save
+	# silently, which is the one failure a user cannot notice until it is too late.
+	if "$out/run-wbx" "$out/core.wbx" "$rom" "$frames" --saveram-out "$work/sram.bin" > "$work/sram.txt" 2>&1; then
+		sram_bytes="$(grep -o 'saveRamBytes=[0-9]*' "$work/sram.txt" | cut -d= -f2)"
+		if [ "${sram_bytes:-0}" -eq 0 ]; then
+			report "$name:saveram" SKIP "this machine has nothing to save"
+		elif ! "$out/run-wbx" "$out/core.wbx" "$rom" 0 --saveram-in "$work/sram.bin" \
+			--saveram-out "$work/sram.rt.bin" > /dev/null 2>&1; then
+			report "$name:saveram" FAIL "the core refused the save file it just wrote"
+		elif cmp -s "$work/sram.bin" "$work/sram.rt.bin"; then
+			report "$name:saveram" PASS "$sram_bytes bytes survive a write/read round-trip"
+		else
+			report "$name:saveram" FAIL "the save file changed across a round-trip"
+		fi
+	else
+		report "$name:saveram" FAIL "save file runner error"
 	fi
 
 	# The optional tooling exports the frontend probes for: absence is allowed, but a core that

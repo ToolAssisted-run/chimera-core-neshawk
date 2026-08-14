@@ -198,6 +198,7 @@ class NES
     cart.ChrSize  = chr8 * 8;
     cart.VramSize = chr8 != 0 ? 0 : 8; // CHR ROM or CHR RAM, never both
     cart.WramSize = 8;                 // NES.iNES.cs: "should be data[8], but that never worked"
+    cart.WramBattery = (romFile[6] & 2) != 0; // flags6 bit1: the cart has a battery behind its WRAM
     cart.PadH     = (romFile[6] & 1) ? 1 : 0;
     cart.PadV     = (romFile[6] & 1) ? 0 : 1;
     if (cart.PrgSize == 0) throw std::runtime_error("iNES header declares no PRG ROM");

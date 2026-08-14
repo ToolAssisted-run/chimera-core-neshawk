@@ -160,6 +160,29 @@ for rom in "${roms[@]}"; do
 		report "$name:keybinds" FAIL "run did not report OK (see tests/work/$name.keys.log)"
 	fi
 
+	# --- save files: the frontend has to write one, and take it back ---
+	# Derived from this rom rather than shipped: setting the battery bit in the iNES header gives
+	# the same machine 8KB of battery-backed WRAM, which is a save file, without needing a
+	# copyrighted cart in CI. The point is the whole frontend path - core says it has a save, the
+	# frontend writes it on exit into the Save RAM path, loads it back next time, and the core
+	# accepts what it gets.
+	python3 "$here/battery-rom.py" "$rom" "$work/$name.battery.nes"
+	sram_dir="$work/sram.$name"
+	rm -rf "$sram_dir"; mkdir -p "$sram_dir"
+	python3 "$here/saveram-config.py" "$work/config.$name.ini" "$work/config.$name.sram.ini" "$sram_dir"
+	sram_file="$sram_dir/$name.battery.SaveRAM"
+	saved_rom="$rom"; rom="$work/$name.battery.nes"
+	if run_frontend "$name.sram1" "$work/config.$name.sram.ini" 60 		&& [ -s "$sram_file" ] && run_frontend "$name.sram2" "$work/config.$name.sram.ini" 60; then
+		if grep -q "Save file not loaded" "$work/$name.sram2.log"; then
+			report "$name:saveram" FAIL "the core refused the save file the frontend had just written"
+		else
+			report "$name:saveram" PASS "$(stat -c%s "$sram_file") bytes written, and taken back"
+		fi
+	else
+		report "$name:saveram" FAIL "no save file at $sram_file (see tests/work/$name.sram1.log)"
+	fi
+	rom="$saved_rom"
+
 	# The region: a PAL machine runs a different frame and shows different scanlines, which the
 	# picture shows even where RAM has converged.
 	settings_config "$work/config.$name.pal.ini" '{"region": "pal"}'

@@ -303,6 +303,79 @@ ECL_EXPORT void PutSettings(int length)
 	wbx_settings_use_file();
 }
 
+/* ---- save files (optional guest ABI group) ----
+ * What a machine keeps when it is switched off: a cart's battery-backed WRAM, or - for the disk
+ * system, which has no battery but writable media - the difference between the disk now and the
+ * disk as it was inserted. The core decides what that is; the host only moves bytes.
+ *
+ * Shaped like the live settings channel: the guest owns a buffer, the host reads it after asking
+ * for a refresh, or writes into it and calls Put. The buffer is ECL_INVISIBLE because a save file
+ * is not machine state - it is what OUTLIVES the machine - and must never enter a savestate.
+ * Absent exports mean a core with nothing to save, which is most of them. */
+namespace
+{
+	uint8_t *g_saveRamBuf = nullptr;
+	int g_saveRamCap = 0;
+
+	uint8_t *saveRamBuffer(int need)
+	{
+		if (need > g_saveRamCap)
+		{
+			// alloc_invisible never frees, so grow in one step to what the biggest disk needs
+			g_saveRamBuf = (uint8_t *)alloc_invisible((size_t)need);
+			g_saveRamCap = g_saveRamBuf != nullptr ? need : 0;
+		}
+		return g_saveRamBuf;
+	}
+}
+
+extern "C"
+{
+
+/// Bytes the core would write out right now, or 0 when it has nothing to save.
+ECL_EXPORT int GetSaveRamSize(void)
+{
+	if (!g_nes || !g_nes->board->HasSaveRam()) return 0;
+	return (int)g_nes->board->ReadSaveRam().size();
+}
+
+/// Fills the buffer with the current save file and returns it (null if there is none).
+ECL_EXPORT uint8_t *GetSaveRam(void)
+{
+	if (!g_nes || !g_nes->board->HasSaveRam()) return nullptr;
+	const std::vector<uint8_t> data = g_nes->board->ReadSaveRam();
+	uint8_t *buf = saveRamBuffer((int)data.size());
+	if (buf == nullptr) return nullptr;
+	memcpy(buf, data.data(), data.size());
+	return buf;
+}
+
+/// Host-side buffer to write a save file into before calling PutSaveRam.
+ECL_EXPORT uint8_t *GetSaveRamBuffer(int size)
+{
+	return (!g_nes || !g_nes->board->HasSaveRam()) ? nullptr : saveRamBuffer(size);
+}
+
+/// Applies the `length` bytes now in the buffer. Returns 0 if the core rejected them - a save file
+/// for a different game, or a disk with a different number of sides - which the frontend reports
+/// rather than starting the machine with half a save applied.
+ECL_EXPORT int PutSaveRam(int length)
+{
+	if (!g_nes || !g_nes->board->HasSaveRam() || g_saveRamBuf == nullptr || length > g_saveRamCap) return 0;
+	try
+	{
+		g_nes->board->StoreSaveRam(g_saveRamBuf, (size_t)length);
+	}
+	catch (const std::exception &e)
+	{
+		printf("QuickerNesHawk: cannot use this save file: %s\n", e.what());
+		return 0;
+	}
+	return 1;
+}
+
+} // extern "C"
+
 /* Input bit layout, matching waterbox.config's input.buttons order. The byte order within a pad is
  * the NES joypad's own (A, B, Select, Start, Up, Down, Left, Right), which is also nesControllers'
  * ButtonBit order, so a byte of the mask passes straight through.

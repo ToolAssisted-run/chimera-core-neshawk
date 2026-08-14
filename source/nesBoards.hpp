@@ -287,6 +287,61 @@ class NesBoard final : public NesBoardBase
       }
     }
 
+    /// FDS.ReadSaveRam: "FDSS", the side count, then each side's diff. Byte for byte NesHawk's
+    /// format, so a .SaveRAM file is the same file on both emulators.
+    std::vector<uint8_t> ReadSaveRam()
+    {
+      // update diff for currently loaded disk first!
+      if (currentside >= 0) diskdiffs[(size_t)currentside] = drive.MakeDiff();
+
+      std::vector<uint8_t> out;
+      auto put32 = [&out](uint32_t v)
+      {
+        out.push_back((uint8_t)(v & 0xFF));
+        out.push_back((uint8_t)((v >> 8) & 0xFF));
+        out.push_back((uint8_t)((v >> 16) & 0xFF));
+        out.push_back((uint8_t)((v >> 24) & 0xFF));
+      };
+      const int sides = NumSides();
+      out.insert(out.end(), { 'F', 'D', 'S', 'S' });
+      put32((uint32_t)sides);
+      for (int i = 0; i < sides; i++)
+      {
+        const auto& diff = diskdiffs[(size_t)i];
+        put32((uint32_t)diff.size());
+        out.insert(out.end(), diff.begin(), diff.end());
+      }
+      return out;
+    }
+
+    /// FDS.StoreSaveRam. Called once, before the machine runs.
+    void StoreSaveRam(const uint8_t* data, size_t length)
+    {
+      size_t pos = 0;
+      auto get32 = [&]() -> uint32_t
+      {
+        if (pos + 4 > length) throw std::runtime_error("FDS Saveram: truncated");
+        const uint32_t v = (uint32_t)data[pos] | ((uint32_t)data[pos + 1] << 8)
+          | ((uint32_t)data[pos + 2] << 16) | ((uint32_t)data[pos + 3] << 24);
+        pos += 4;
+        return v;
+      };
+
+      if (length < 8 || memcmp(data, "FDSS", 4) != 0) throw std::runtime_error("FDS Saveram: bad header");
+      pos = 4;
+      const int sides = (int)get32();
+      if (sides != NumSides()) throw std::runtime_error("FDS Saveram: wrong number of sides");
+      for (int i = 0; i < sides; i++)
+      {
+        const uint32_t len = get32();
+        if (pos + len > length) throw std::runtime_error("FDS Saveram: truncated");
+        diskdiffs[(size_t)i].assign(data + pos, data + pos + len);
+        pos += len;
+      }
+      if (currentside >= 0 && !diskdiffs[(size_t)currentside].empty())
+        drive.ApplyDiff(diskdiffs[(size_t)currentside]);
+    }
+
     void InsertSide(int side)
     {
       if (side >= NumSides()) throw std::runtime_error("FDS: no such disk side");
@@ -615,6 +670,25 @@ class NesBoard final : public NesBoardBase
     }
     mmc3.just_cleared = mmc3.just_cleared_pending;
     mmc3.just_cleared_pending = false;
+  }
+
+  /// NesBoardBase.SaveRam: battery-backed WRAM, and nothing at all without a battery. The disk
+  /// system has no battery but does have writable media, and NesHawk saves that too - as the
+  /// difference from the disk as it was loaded, since the disk itself is 65500 bytes a side.
+  bool HasSaveRam() const { return kind == Kind::FDS || Cart.WramBattery; }
+
+  std::vector<uint8_t> ReadSaveRam()
+  {
+    if (kind == Kind::FDS) return fds.ReadSaveRam();
+    return Cart.WramBattery ? Wram : std::vector<uint8_t>();
+  }
+
+  void StoreSaveRam(const uint8_t* data, size_t length)
+  {
+    if (kind == Kind::FDS) { fds.StoreSaveRam(data, length); return; }
+    if (!Cart.WramBattery) return;
+    if (length != Wram.size()) throw std::runtime_error("save file is the wrong size for this cart");
+    memcpy(Wram.data(), data, length);
   }
 
   /// FDS.SetIRQ: either source raises the same line

@@ -3,6 +3,7 @@
  * against the same core built natively on the same inputs.
  *
  * usage: run-wbx <core.wbx> <rom.nes> <frames> [--rerecord] [--blank] [--settings <file.json>]
+ *                 [--saveram-out <file>] [--saveram-in <file>]
  *
  * --rerecord round-trips the WHOLE guest machine through the host's save/load state around every
  *   frame; the digests must be identical either way.
@@ -69,11 +70,19 @@ typedef uintptr_t (MB_GUEST_ABI *ptrfn_i)(int);
 typedef int (MB_GUEST_ABI *intfn_i)(int);
 typedef int64_t (MB_GUEST_ABI *i64fn_i)(int);
 
-static uintptr_t proc(mb_host *h, const char *n)
+/* zero when the guest does not export it: an optional ABI group is absent, not broken */
+static uintptr_t tryproc(mb_host *h, const char *n)
 {
 	mb_return r; wbx_get_proc_addr(h, n, &r);
 	if (r.error_message[0]) { fprintf(stderr, "proc %s: %s\n", n, r.error_message); exit(2); }
 	return r.data;
+}
+
+static uintptr_t proc(mb_host *h, const char *n)
+{
+	uintptr_t p = tryproc(h, n);
+	if (!p) { fprintf(stderr, "missing required export %s\n", n); exit(2); }
+	return p;
 }
 
 static uint8_t *slurp(const char *p, long *n)
@@ -87,11 +96,14 @@ static uint8_t *slurp(const char *p, long *n)
 
 int main(int argc, char **argv)
 {
-	const char *wbxPath = 0, *romPath = 0, *settingsPath = 0; long frames = 60; int rerecord = 0, blank = 0;
+	const char *wbxPath = 0, *romPath = 0, *settingsPath = 0, *sramOut = 0, *sramIn = 0;
+	long frames = 60; int rerecord = 0, blank = 0;
 	for (int i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "--rerecord")) rerecord = 1;
 		else if (!strcmp(argv[i], "--blank")) blank = 1;
 		else if (!strcmp(argv[i], "--settings") && i + 1 < argc) settingsPath = argv[++i];
+		else if (!strcmp(argv[i], "--saveram-out") && i + 1 < argc) sramOut = argv[++i];
+		else if (!strcmp(argv[i], "--saveram-in") && i + 1 < argc) sramIn = argv[++i];
 		else if (!wbxPath) wbxPath = argv[i];
 		else if (!romPath) romPath = argv[i];
 		else frames = strtol(argv[i], 0, 0);
@@ -142,6 +154,24 @@ int main(int argc, char **argv)
 	wbx_activate_host(h, &r);
 	intfn Init = (intfn)proc(h, "Init");
 	if (Init() != 1) { fprintf(stderr, "Init failed (bad rom?)\n"); return 1; }
+
+	/* save files: the optional guest group. --saveram-in is applied before the first frame, exactly
+	 * where the frontend applies a .SaveRAM file; --saveram-out is written after the last one. */
+	intfn SaveRamSize = (intfn)tryproc(h, "GetSaveRamSize");
+	ptrfn GetSaveRam = (ptrfn)tryproc(h, "GetSaveRam");
+	ptrfn_i GetSaveRamBuffer = (ptrfn_i)tryproc(h, "GetSaveRamBuffer");
+	intfn_i PutSaveRam = (intfn_i)tryproc(h, "PutSaveRam");
+	if (sramIn) {
+		if (!GetSaveRamBuffer || !PutSaveRam) { fprintf(stderr, "core has no save file support\n"); return 1; }
+		long n = 0;
+		uint8_t *data = slurp(sramIn, &n);
+		if (!data) { fprintf(stderr, "cannot read %s\n", sramIn); return 1; }
+		void *dst = (void *)GetSaveRamBuffer((int)n);
+		if (!dst) { fprintf(stderr, "core would not give a %ld byte save buffer\n", n); return 1; }
+		memcpy(dst, data, (size_t)n);
+		if (!PutSaveRam((int)n)) { fprintf(stderr, "core refused the save file\n"); return 1; }
+		free(data);
+	}
 
 	framefn FrameAdvance = (framefn)proc(h, "FrameAdvance");
 	ptrfn GetVideoBgra = (ptrfn)proc(h, "GetVideoBgra");
@@ -203,6 +233,16 @@ int main(int argc, char **argv)
 		if (!dname) continue;
 		uint64_t dh = fnv(0, (const void *)GetMemoryDomainPtr(i), (size_t)GetMemoryDomainSize(i));
 		printf("domain[%s]=%016llx\n", dname, (unsigned long long)dh);
+	}
+
+	if (sramOut) {
+		int n = SaveRamSize ? SaveRamSize() : 0;
+		const void *src = (n > 0 && GetSaveRam) ? (const void *)GetSaveRam() : 0;
+		FILE *f = fopen(sramOut, "wb");
+		if (!f) { fprintf(stderr, "cannot write %s\n", sramOut); return 1; }
+		if (src) fwrite(src, 1, (size_t)n, f);
+		fclose(f);
+		printf("saveRamBytes=%d\n", src ? n : 0);
 	}
 
 	wbx_deactivate_host(h, &r); wbx_destroy_host(h, &r);

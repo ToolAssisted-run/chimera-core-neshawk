@@ -110,6 +110,14 @@ groups, so the frontend never learns what a nametable is:
 says how it is played by default - so without that file the core would arrive unplayable until the
 user bound every key. Player 1 only and Reset unbound, which is BizHawk's own choice.
 
+**Save files** are the optional `GetSaveRamSize` / `GetSaveRam` / `GetSaveRamBuffer` /
+`PutSaveRam` group. Battery-backed carts hand over their WRAM; the disk system hands over the
+difference between the disk now and the disk as it was inserted, in NesHawk's own `FDSS` format, so
+a `.SaveRAM` file is the same file on both emulators. A cart with no battery exports a size of zero
+and the frontend greys its Save RAM menu out. `PutSaveRam` returns 0 for a file that does not fit
+the machine (wrong size, wrong number of disk sides) rather than applying half of it - the frontend
+then says so and boots the machine clean.
+
 **Frame rate and sample count** are answered after Init (`GetVsyncNumerator`,
 `GetVsyncDenominator`, `GetAudioSampleCount`) rather than declared in the config, because the region
 is a user setting and a band-limited resampler does not produce the same number of samples
@@ -129,10 +137,9 @@ every frame.
   into the core.
 - **No Power button**: the controller has Reset (soft) but not Power, because a hard reset rebuilds
   the board and the host has already mapped the board's memory domains by pointer.
-- **Disk writes do not outlive the session.** A disk system game writes to its disk, and those
-  writes are machine state here: they are in savestates and survive an eject, but there is no
-  save-file channel in the package ABI, so quitting loses them. NesHawk keeps them in a `.sav`
-  through its SaveRam interface. This is an ABI gap, not an emulation one.
+- **Movies do not record the save file.** A movie that starts from a machine with a save in it
+  replays against whatever save is on disk at the time. NesHawk records it in the movie; here the
+  frontend would have to, and does not yet.
 
 ## The Famicom Disk System
 
