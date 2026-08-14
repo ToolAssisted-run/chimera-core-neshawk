@@ -160,28 +160,36 @@ for rom in "${roms[@]}"; do
 		report "$name:keybinds" FAIL "run did not report OK (see tests/work/$name.keys.log)"
 	fi
 
-	# --- save files: the frontend has to write one, and take it back ---
-	# Derived from this rom rather than shipped: setting the battery bit in the iNES header gives
-	# the same machine 8KB of battery-backed WRAM, which is a save file, without needing a
-	# copyrighted cart in CI. The point is the whole frontend path - core says it has a save, the
-	# frontend writes it on exit into the Save RAM path, loads it back next time, and the core
-	# accepts what it gets.
+	# --- bundles: a game that is more than one file ---
+	# A bundle catalogues a rom and what a core keeps beside it. The rom here is this one with the
+	# battery bit set in its iNES header, which gives the same machine 8KB of battery-backed RAM -
+	# something to keep - without needing a copyrighted cart in CI. What is being checked is the
+	# whole path: the core reports it keeps something, the bundle names a file for it, the frontend
+	# hands it over on load and writes it back on close, re-pinning the hash it names it by.
 	python3 "$here/battery-rom.py" "$rom" "$work/$name.battery.nes"
-	sram_dir="$work/sram.$name"
-	rm -rf "$sram_dir"; mkdir -p "$sram_dir"
-	python3 "$here/saveram-config.py" "$work/config.$name.ini" "$work/config.$name.sram.ini" "$sram_dir"
-	sram_file="$sram_dir/$name.battery.SaveRAM"
-	saved_rom="$rom"; rom="$work/$name.battery.nes"
-	if run_frontend "$name.sram1" "$work/config.$name.sram.ini" 60 		&& [ -s "$sram_file" ] && run_frontend "$name.sram2" "$work/config.$name.sram.ini" 60; then
-		if grep -q "Save file not loaded" "$work/$name.sram2.log"; then
-			report "$name:saveram" FAIL "the core refused the save file the frontend had just written"
-		else
-			report "$name:saveram" PASS "$(stat -c%s "$sram_file") bytes written, and taken back"
-		fi
+	bundle_dir="$work/bundle.$name"
+	rm -rf "$bundle_dir"; mkdir -p "$bundle_dir"
+	if ! "$wb/bin/run-wbx" "$wb/bin/core.wbx" "$work/$name.battery.nes" 60 \
+		--saveram-out "$bundle_dir/$name.sram" > /dev/null 2>&1; then
+		report "$name:bundle" FAIL "could not get a save file out of the core"
 	else
-		report "$name:saveram" FAIL "no save file at $sram_file (see tests/work/$name.sram1.log)"
+		python3 "$here/compose-bundle.py" "$bundle_dir/$name.bundle" "$work/$name.battery.nes" \
+			"QuickerNesHawk" "sram" "$bundle_dir/$name.sram"
+		before="$(sha1sum "$bundle_dir/$name.sram" | cut -d' ' -f1)"
+		saved_rom="$rom"; rom="$bundle_dir/$name.bundle"
+		if run_frontend "$name.bundle" "$work/config.$name.ini" 60; then
+			if grep -q "not loaded" "$work/$name.bundle.log"; then
+				report "$name:bundle" FAIL "the core refused what the bundle named"
+			elif ! python3 "$here/check-bundle.py" "$bundle_dir/$name.bundle" "$before"; then
+				report "$name:bundle" FAIL "the bundle was not written back on close"
+			else
+				report "$name:bundle" PASS "loaded from a bundle, written back to it, re-pinned"
+			fi
+		else
+			report "$name:bundle" FAIL "run did not report OK (see tests/work/$name.bundle.log)"
+		fi
+		rom="$saved_rom"
 	fi
-	rom="$saved_rom"
 
 	# The region: a PAL machine runs a different frame and shows different scanlines, which the
 	# picture shows even where RAM has converged.

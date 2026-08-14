@@ -110,13 +110,15 @@ groups, so the frontend never learns what a nametable is:
 says how it is played by default - so without that file the core would arrive unplayable until the
 user bound every key. Player 1 only and Reset unbound, which is BizHawk's own choice.
 
-**Save files** are the optional `GetSaveRamSize` / `GetSaveRam` / `GetSaveRamBuffer` /
-`PutSaveRam` group. Battery-backed carts hand over their WRAM; the disk system hands over the
+**Persistent data** - what the machine keeps when it is switched off - is the optional
+`GetPersistentSize` / `GetPersistent` / `GetPersistentBuffer` / `PutPersistent` group, plus
+`GetPersistentName` and `GetPersistentId`: the frontend has no word for this, so the core supplies
+both the label it is shown under ("Cartridge SRAM", "Disk Contents") and the id a bundle files it
+under ("sram", "disk"). Battery-backed carts hand over their WRAM; the disk system hands over the
 difference between the disk now and the disk as it was inserted, in NesHawk's own `FDSS` format, so
-a `.SaveRAM` file is the same file on both emulators. A cart with no battery exports a size of zero
-and the frontend greys its Save RAM menu out. `PutSaveRam` returns 0 for a file that does not fit
-the machine (wrong size, wrong number of disk sides) rather than applying half of it - the frontend
-then says so and boots the machine clean.
+the file is interchangeable with BizHawk's. A cart with no battery reports zero and the entry does
+not appear at all. `PutPersistent` returns 0 for data that does not fit the machine (wrong size,
+wrong number of disk sides) rather than applying half of it.
 
 **Frame rate and sample count** are answered after Init (`GetVsyncNumerator`,
 `GetVsyncDenominator`, `GetAudioSampleCount`) rather than declared in the config, because the region

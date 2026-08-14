@@ -157,19 +157,19 @@ int main(int argc, char **argv)
 
 	/* save files: the optional guest group. --saveram-in is applied before the first frame, exactly
 	 * where the frontend applies a .SaveRAM file; --saveram-out is written after the last one. */
-	intfn SaveRamSize = (intfn)tryproc(h, "GetSaveRamSize");
-	ptrfn GetSaveRam = (ptrfn)tryproc(h, "GetSaveRam");
-	ptrfn_i GetSaveRamBuffer = (ptrfn_i)tryproc(h, "GetSaveRamBuffer");
-	intfn_i PutSaveRam = (intfn_i)tryproc(h, "PutSaveRam");
+	intfn PersistentSize = (intfn)tryproc(h, "GetPersistentSize");
+	ptrfn GetPersistent = (ptrfn)tryproc(h, "GetPersistent");
+	ptrfn_i GetPersistentBuffer = (ptrfn_i)tryproc(h, "GetPersistentBuffer");
+	intfn_i PutPersistent = (intfn_i)tryproc(h, "PutPersistent");
 	if (sramIn) {
-		if (!GetSaveRamBuffer || !PutSaveRam) { fprintf(stderr, "core has no save file support\n"); return 1; }
+		if (!GetPersistentBuffer || !PutPersistent) { fprintf(stderr, "core has no save file support\n"); return 1; }
 		long n = 0;
 		uint8_t *data = slurp(sramIn, &n);
 		if (!data) { fprintf(stderr, "cannot read %s\n", sramIn); return 1; }
-		void *dst = (void *)GetSaveRamBuffer((int)n);
+		void *dst = (void *)GetPersistentBuffer((int)n);
 		if (!dst) { fprintf(stderr, "core would not give a %ld byte save buffer\n", n); return 1; }
 		memcpy(dst, data, (size_t)n);
-		if (!PutSaveRam((int)n)) { fprintf(stderr, "core refused the save file\n"); return 1; }
+		if (!PutPersistent((int)n)) { fprintf(stderr, "core refused the save file\n"); return 1; }
 		free(data);
 	}
 
@@ -236,8 +236,8 @@ int main(int argc, char **argv)
 	}
 
 	if (sramOut) {
-		int n = SaveRamSize ? SaveRamSize() : 0;
-		const void *src = (n > 0 && GetSaveRam) ? (const void *)GetSaveRam() : 0;
+		int n = PersistentSize ? PersistentSize() : 0;
+		const void *src = (n > 0 && GetPersistent) ? (const void *)GetPersistent() : 0;
 		FILE *f = fopen(sramOut, "wb");
 		if (!f) { fprintf(stderr, "cannot write %s\n", sramOut); return 1; }
 		if (src) fwrite(src, 1, (size_t)n, f);
