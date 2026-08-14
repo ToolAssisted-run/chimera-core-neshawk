@@ -180,6 +180,17 @@ namespace
 		((audio::BandLimitedResampler<MaxSamplesPerFrame> *)ctx)->AddDelta(clock, delta);
 	}
 
+	/* Why the last Init refused, in words meant for the person who has to fix it. The host reads
+	 * this through GetLoadError and shows it instead of a stack trace, so a core is the one that
+	 * explains itself: only it knows that this file is a disk image, or that its mapper is not
+	 * translated yet. ECL_INVISIBLE - it is a diagnostic, not machine state. */
+	ECL_INVISIBLE char g_loadError[512];
+
+	void setLoadError(const char *what)
+	{
+		snprintf(g_loadError, sizeof g_loadError, "%s", what);
+	}
+
 	// Reads a whole mounted file (caller frees). Null if it is not mounted at all - which is how a
 	// firmware file the user has not provided shows up, since the host only mounts what it has.
 	uint8_t *readMounted(const char *name, uint32_t *outLen)
@@ -236,11 +247,20 @@ namespace
 extern "C"
 {
 
+/// The reason the last Init failed, or an empty string. Read by the host after Init returns 0.
+ECL_EXPORT const char *GetLoadError(void) { return g_loadError; }
+
 ECL_EXPORT int Init(void)
 {
+	g_loadError[0] = '\0';
+
 	uint32_t romLen = 0;
 	uint8_t *rom = readMounted("rom", &romLen);
-	if (!rom) return 0;
+	if (!rom)
+	{
+		setLoadError("no rom was mounted");
+		return 0;
+	}
 
 	/* The disk system BIOS, declared as firmware in waterbox.config and mounted by the frontend
 	 * under that id. A cartridge never asks for it, so its absence is only an error for a disk
@@ -265,6 +285,7 @@ ECL_EXPORT int Init(void)
 	}
 	catch (const std::exception &e)
 	{
+		setLoadError(e.what());
 		printf("QuickerNesHawk: cannot load this rom: %s\n", e.what());
 		free(rom);
 		free(bios);
