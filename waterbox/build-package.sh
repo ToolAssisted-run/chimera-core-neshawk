@@ -21,7 +21,7 @@ while getopts "m:r:o:" opt; do
 done
 
 if [ -z "$minihawk_root" ]; then
-	for candidate in "$here/../../miniHawk" "$HOME/miniHawk"; do
+	for candidate in "$here/../../chimera" "$HOME/chimera" "$here/../../miniHawk" "$HOME/miniHawk"; do
 		[ -d "$candidate" ] && { minihawk_root="$candidate"; break; }
 	done
 fi
