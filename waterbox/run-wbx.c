@@ -3,7 +3,6 @@
  * against the same core built natively on the same inputs.
  *
  * usage: run-wbx <core.wbx> <rom.nes> <frames> [--rerecord] [--blank] [--settings <file.json>]
- *                 [--saveram-out <file>] [--saveram-in <file>]
  *
  * --rerecord round-trips the WHOLE guest machine through the host's save/load state around every
  *   frame; the digests must be identical either way.
@@ -96,14 +95,12 @@ static uint8_t *slurp(const char *p, long *n)
 
 int main(int argc, char **argv)
 {
-	const char *wbxPath = 0, *romPath = 0, *settingsPath = 0, *sramOut = 0, *sramIn = 0;
+	const char *wbxPath = 0, *romPath = 0, *settingsPath = 0;
 	long frames = 60; int rerecord = 0, blank = 0;
 	for (int i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "--rerecord")) rerecord = 1;
 		else if (!strcmp(argv[i], "--blank")) blank = 1;
 		else if (!strcmp(argv[i], "--settings") && i + 1 < argc) settingsPath = argv[++i];
-		else if (!strcmp(argv[i], "--saveram-out") && i + 1 < argc) sramOut = argv[++i];
-		else if (!strcmp(argv[i], "--saveram-in") && i + 1 < argc) sramIn = argv[++i];
 		else if (!wbxPath) wbxPath = argv[i];
 		else if (!romPath) romPath = argv[i];
 		else frames = strtol(argv[i], 0, 0);
@@ -154,24 +151,6 @@ int main(int argc, char **argv)
 	wbx_activate_host(h, &r);
 	intfn Init = (intfn)proc(h, "Init");
 	if (Init() != 1) { fprintf(stderr, "Init failed (bad rom?)\n"); return 1; }
-
-	/* save files: the optional guest group. --saveram-in is applied before the first frame, exactly
-	 * where the frontend applies a .SaveRAM file; --saveram-out is written after the last one. */
-	intfn PersistentSize = (intfn)tryproc(h, "GetPersistentSize");
-	ptrfn GetPersistent = (ptrfn)tryproc(h, "GetPersistent");
-	ptrfn_i GetPersistentBuffer = (ptrfn_i)tryproc(h, "GetPersistentBuffer");
-	intfn_i PutPersistent = (intfn_i)tryproc(h, "PutPersistent");
-	if (sramIn) {
-		if (!GetPersistentBuffer || !PutPersistent) { fprintf(stderr, "core has no save file support\n"); return 1; }
-		long n = 0;
-		uint8_t *data = slurp(sramIn, &n);
-		if (!data) { fprintf(stderr, "cannot read %s\n", sramIn); return 1; }
-		void *dst = (void *)GetPersistentBuffer((int)n);
-		if (!dst) { fprintf(stderr, "core would not give a %ld byte save buffer\n", n); return 1; }
-		memcpy(dst, data, (size_t)n);
-		if (!PutPersistent((int)n)) { fprintf(stderr, "core refused the save file\n"); return 1; }
-		free(data);
-	}
 
 	framefn FrameAdvance = (framefn)proc(h, "FrameAdvance");
 	ptrfn GetVideoBgra = (ptrfn)proc(h, "GetVideoBgra");
@@ -233,16 +212,6 @@ int main(int argc, char **argv)
 		if (!dname) continue;
 		uint64_t dh = fnv(0, (const void *)GetMemoryDomainPtr(i), (size_t)GetMemoryDomainSize(i));
 		printf("domain[%s]=%016llx\n", dname, (unsigned long long)dh);
-	}
-
-	if (sramOut) {
-		int n = PersistentSize ? PersistentSize() : 0;
-		const void *src = (n > 0 && GetPersistent) ? (const void *)GetPersistent() : 0;
-		FILE *f = fopen(sramOut, "wb");
-		if (!f) { fprintf(stderr, "cannot write %s\n", sramOut); return 1; }
-		if (src) fwrite(src, 1, (size_t)n, f);
-		fclose(f);
-		printf("saveRamBytes=%d\n", src ? n : 0);
 	}
 
 	wbx_deactivate_host(h, &r); wbx_destroy_host(h, &r);

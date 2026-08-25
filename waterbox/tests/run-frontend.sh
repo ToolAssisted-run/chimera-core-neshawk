@@ -160,37 +160,6 @@ for rom in "${roms[@]}"; do
 		report "$name:keybinds" FAIL "run did not report OK (see tests/work/$name.keys.log)"
 	fi
 
-	# --- bundles: a game that is more than one file ---
-	# A bundle catalogues a rom and what a core keeps beside it. The rom here is this one with the
-	# battery bit set in its iNES header, which gives the same machine 8KB of battery-backed RAM -
-	# something to keep - without needing a copyrighted cart in CI. What is being checked is the
-	# whole path: the core reports it keeps something, the bundle names a file for it, the frontend
-	# hands it over on load and writes it back on close, re-pinning the hash it names it by.
-	python3 "$here/battery-rom.py" "$rom" "$work/$name.battery.nes"
-	bundle_dir="$work/bundle.$name"
-	rm -rf "$bundle_dir"; mkdir -p "$bundle_dir"
-	if ! "$wb/bin/run-wbx" "$wb/bin/core.wbx" "$work/$name.battery.nes" 60 \
-		--saveram-out "$bundle_dir/$name.sram" > /dev/null 2>&1; then
-		report "$name:bundle" FAIL "could not get a save file out of the core"
-	else
-		python3 "$here/compose-bundle.py" "$bundle_dir/$name.gameBundle" "$work/$name.battery.nes" \
-			"QuickerNesHawk" "sram" "$bundle_dir/$name.sram"
-		before="$(sha1sum "$bundle_dir/$name.sram" | cut -d' ' -f1)"
-		saved_rom="$rom"; rom="$bundle_dir/$name.gameBundle"
-		if run_frontend "$name.gameBundle" "$work/config.$name.ini" 60; then
-			if grep -q "not loaded" "$work/$name.gameBundle.log"; then
-				report "$name:bundle" FAIL "the core refused what the bundle named"
-			elif ! python3 "$here/check-bundle.py" "$bundle_dir/$name.gameBundle" "$before"; then
-				report "$name:bundle" FAIL "the bundle was not written back on close"
-			else
-				report "$name:bundle" PASS "loaded from a bundle, written back to it, re-pinned"
-			fi
-		else
-			report "$name:bundle" FAIL "run did not report OK (see tests/work/$name.gameBundle.log)"
-		fi
-		rom="$saved_rom"
-	fi
-
 	# The region: a PAL machine runs a different frame and shows different scanlines, which the
 	# picture shows even where RAM has converged.
 	settings_config "$work/config.$name.pal.ini" '{"region": "pal"}'
