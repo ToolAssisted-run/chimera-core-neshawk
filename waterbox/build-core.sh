@@ -43,7 +43,7 @@ mkdir -p "$out/obj"
 # Exceptions are ON, unlike most waterbox guests: the core reports an unloadable rom - unsupported
 # mapper, truncated file - by throwing, and Init catches it and fails cleanly instead of emulating
 # nonsense. RTTI stays off; catch-by-type does not need it.
-cflags="-fvisibility=hidden -mcmodel=large -mstack-protector-guard=global \
+cflags="-fvisibility=hidden -mcmodel=large -mstack-protector-guard=global -fno-stack-protector \
 	-fno-pic -fno-pie -fcf-protection=none -O2 -DNDEBUG"
 cxxflags="$cflags -std=c++17 -fexceptions -fno-rtti -DNESHAWK_FULL_AV"
 cxxincs="-I$sr/include/c++/$gccver -I$sr/include/c++/$gccver/x86_64-linux-musl"
@@ -99,6 +99,8 @@ g++ -O2 -Wall -std=c++17 -DNESHAWK_FULL_AV -o "$out/run-native" "$here/run-nativ
 gcc -O2 -Wall -I"$mb/source/host" -o "$out/run-tooling" "$here/run-tooling.c" \
 	"$mbuild/source/host/libminiboxhost.so" -Wl,-rpath,"$mbuild/source/host"
 echo "built $out/run-wbx, $out/run-native and $out/run-tooling"
+
+sh "$mb/source/guest/check-wbx.sh" "$out/core.wbx"
 
 # the package the frontend loads: core.wbx (fixed name) + waterbox.config
 cp "$here/waterbox.config" "$out/waterbox.config"
