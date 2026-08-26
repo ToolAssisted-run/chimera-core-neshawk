@@ -15,6 +15,7 @@
  */
 #include <emulibc.h>
 #include <waterbox_settings.h>
+#include <waterbox_slots.h>
 
 #include <stdint.h>
 #include <stdio.h>
@@ -254,8 +255,13 @@ ECL_EXPORT int Init(void)
 {
 	g_loadError[0] = '\0';
 
+	/* The cartridge. A chimera project mounts "slots" naming its canonical
+	 * file ({"rom":["x.nes"]}, see file_slots.json); without the map, the
+	 * legacy "rom" mount. */
+	char romName[256] = "rom";
+	wbx_slot_first("rom", romName, sizeof romName);
 	uint32_t romLen = 0;
-	uint8_t *rom = readMounted("rom", &romLen);
+	uint8_t *rom = readMounted(romName, &romLen);
 	if (!rom)
 	{
 		setLoadError("no rom was mounted");
