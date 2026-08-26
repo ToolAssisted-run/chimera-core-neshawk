@@ -1,0 +1,16 @@
+{
+  "package": "quickerneshawk",
+  "effectiveTerms": "MIT",
+  "commercialUse": "allowed",
+  "note": "A C++ translation of BizHawk's NesHawk core; BizHawk's C# frontend and NesHawk are MIT. blip_buf is bundled under its own terms - see the repository LICENSE.",
+  "components": [
+    {
+      "name": "QuickerNesHawk (translation and integration)",
+      "license": "MIT",
+      "url": "https://github.com/ToolAssisted-run/chimera-core-neshawk",
+      "commit": "{selfCommit}",
+      "file": "LICENSE",
+      "sourceUrl": "https://github.com/ToolAssisted-run/chimera-core-neshawk/archive/{commit}.tar.gz"
+    }
+  ]
+}
