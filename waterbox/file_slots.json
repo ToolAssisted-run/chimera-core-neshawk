@@ -3,11 +3,14 @@
   "slots": [
     {
       "id": "rom",
-      "title": "Cartridge",
+      "title": "Cartridge or Famicom disk",
       "min": 1,
       "max": 1,
-      "formats": ["nes"],
-      "help": "The NES cartridge image in iNES format (.nes)."
+      "formats": [
+        "nes",
+        "fds"
+      ],
+      "help": "The game: an iNES cartridge image (.nes), or a Famicom Disk System image (.fds) - a disk makes the FDS BIOS a firmware requirement on the next wizard page, where a cartridge needs none."
     }
   ]
 }
