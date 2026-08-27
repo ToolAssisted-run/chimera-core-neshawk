@@ -29,7 +29,7 @@ build for the host and for the guest, and the gate below requires the two to agr
 ```
 
 The C++ guest toolchain (musl plus a libstdc++ built for the sandbox) comes from the miniBox
-checkout inside miniHawk (`extern/miniBox`); `build-package.sh` configures and builds it on demand.
+checkout inside miniHawk (`extern/chimera-common-minibox`); `build-package.sh` configures and builds it on demand.
 
 Two build flags matter:
 
