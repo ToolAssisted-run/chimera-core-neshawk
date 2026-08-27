@@ -39,7 +39,7 @@ fi
 minihawk_root="$(cd "$minihawk_root" && pwd)"
 
 emu_hawk="$minihawk_root/build/Chimera.exe"
-package="$minihawk_root/build/Cores/quickerneshawk.zip"
+package="$minihawk_root/build/Cores/quickerneshawk.chimeraCore"
 [ -f "$emu_hawk" ] || { echo "EmuHawk not built: $emu_hawk" >&2; exit 1; }
 [ -f "$package" ] || { echo "package not installed: $package (run ../build-package.sh)" >&2; exit 1; }
 nat="$wb/../build/meson-native"

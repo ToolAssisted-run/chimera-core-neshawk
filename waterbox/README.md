@@ -26,7 +26,7 @@ build for the host and for the guest, and the gate below requires the two to agr
 ## Building
 
 ```sh
-./build-package.sh -r <miniHawk checkout>   # -> <miniHawk>/build/Cores/quickerneshawk.zip
+./build-package.sh -r <miniHawk checkout>   # -> <miniHawk>/build/Cores/quickerneshawk.chimeraCore
 ```
 
 The C++ guest toolchain (musl plus a libstdc++ built for the sandbox) comes from the miniBox
