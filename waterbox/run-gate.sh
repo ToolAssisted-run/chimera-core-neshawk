@@ -11,16 +11,19 @@
 # It needs only gcc, meson and python3 - no .NET, Mono or X.
 #
 # Usage:
-#   ./run-gate.sh [-o <build dir>] [-f <frames>] [rom...]
+#   ./run-gate.sh [-n <native build dir>] [-g <guest build dir>] [-f <frames>] [rom...]
 # with no roms it uses the free-to-distribute set vendored in roms/.
 set -u
 
 here="$(cd "$(dirname "$0")" && pwd)"
-out="$here/bin"
+root="$(cd "$here/.." && pwd)"
+nat="$root/build/meson-native"
+gst="$root/build/meson-guest"
 frames=600
-while getopts "o:f:" opt; do
+while getopts "n:g:f:" opt; do
 	case "$opt" in
-		o) out="$OPTARG" ;;
+		n) nat="$OPTARG" ;;
+		g) gst="$OPTARG" ;;
 		f) frames="$OPTARG" ;;
 		*) exit 2 ;;
 	esac
@@ -32,8 +35,10 @@ if [ ${#roms[@]} -eq 0 ]; then
 	roms=("$here/roms/sprilo.nes")
 fi
 
-[ -x "$out/run-wbx" ] || { echo "drivers not built: $out/run-wbx (run build-core.sh)" >&2; exit 1; }
-[ -x "$out/run-native" ] || { echo "drivers not built: $out/run-native (run build-core.sh)" >&2; exit 1; }
+[ -x "$nat/run-wbx" ] && [ -x "$nat/run-native" ] || {
+	echo "native build missing: meson setup build/meson-native && ninja -C build/meson-native" >&2; exit 1; }
+[ -f "$gst/core.wbx" ] || {
+	echo "guest build missing: sh waterbox/setup-guest.sh && ninja -C build/meson-guest" >&2; exit 1; }
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
@@ -52,10 +57,10 @@ for rom in "${roms[@]}"; do
 	name="$(basename "$rom" .nes)"
 	if [ ! -f "$rom" ]; then report "$name" SKIP "rom not found"; continue; fi
 
-	if ! "$out/run-native" "$rom" "$frames" 2>"$work/nat.err" | digests > "$work/nat.txt"; then
+	if ! "$nat/run-native" "$rom" "$frames" 2>"$work/nat.err" | digests > "$work/nat.txt"; then
 		report "$name:equivalence" FAIL "native runner error: $(head -1 "$work/nat.err")"; continue
 	fi
-	if ! "$out/run-wbx" "$out/core.wbx" "$rom" "$frames" 2>"$work/box.err" | digests > "$work/box.txt"; then
+	if ! "$nat/run-wbx" "$gst/core.wbx" "$rom" "$frames" 2>"$work/box.err" | digests > "$work/box.txt"; then
 		report "$name:equivalence" FAIL "waterbox runner error: $(head -1 "$work/box.err")"; continue
 	fi
 	if cmp -s "$work/nat.txt" "$work/box.txt"; then
@@ -66,7 +71,7 @@ for rom in "${roms[@]}"; do
 
 	# Round-trip the whole machine through save/load state around every frame: the digests must come
 	# out exactly as they do without it.
-	if ! "$out/run-wbx" "$out/core.wbx" "$rom" "$frames" --rerecord 2>/dev/null | digests > "$work/rr.txt"; then
+	if ! "$nat/run-wbx" "$gst/core.wbx" "$rom" "$frames" --rerecord 2>/dev/null | digests > "$work/rr.txt"; then
 		report "$name:savestate" FAIL "rerecord runner error"; continue
 	fi
 	if cmp -s "$work/box.txt" "$work/rr.txt"; then
@@ -78,11 +83,11 @@ for rom in "${roms[@]}"; do
 	# Save files, when the machine has one: what the core writes out has to be what a fresh machine
 	# takes back in. A disk or a battery cart that reloaded a save differently would lose the save
 	# silently, which is the one failure a user cannot notice until it is too late.
-	if "$out/run-wbx" "$out/core.wbx" "$rom" "$frames" --saveram-out "$work/sram.bin" > "$work/sram.txt" 2>&1; then
+	if "$nat/run-wbx" "$gst/core.wbx" "$rom" "$frames" --saveram-out "$work/sram.bin" > "$work/sram.txt" 2>&1; then
 		sram_bytes="$(grep -o 'saveRamBytes=[0-9]*' "$work/sram.txt" | cut -d= -f2)"
 		if [ "${sram_bytes:-0}" -eq 0 ]; then
 			report "$name:saveram" SKIP "this machine has nothing to save"
-		elif ! "$out/run-wbx" "$out/core.wbx" "$rom" 0 --saveram-in "$work/sram.bin" \
+		elif ! "$nat/run-wbx" "$gst/core.wbx" "$rom" 0 --saveram-in "$work/sram.bin" \
 			--saveram-out "$work/sram.rt.bin" > /dev/null 2>&1; then
 			report "$name:saveram" FAIL "the core refused the save file it just wrote"
 		elif cmp -s "$work/sram.bin" "$work/sram.rt.bin"; then
@@ -96,8 +101,8 @@ for rom in "${roms[@]}"; do
 
 	# The optional tooling exports the frontend probes for: absence is allowed, but a core that
 	# claims a surface must render one.
-	if [ -x "$out/run-tooling" ]; then
-		if "$out/run-tooling" "$out/core.wbx" "$rom" 120 > "$work/tool.txt" 2>&1; then
+	if [ -x "$nat/run-tooling" ]; then
+		if "$nat/run-tooling" "$gst/core.wbx" "$rom" 120 > "$work/tool.txt" 2>&1; then
 			if grep -q "RENDER FAILED" "$work/tool.txt"; then
 				report "$name:tooling" FAIL "a declared surface did not render"
 			else

@@ -16,9 +16,10 @@ build for the host and for the guest, and the gate below requires the two to agr
 | `nes6502Disasm.hpp` | NesHawk's 6502 disassembler, generated from BizHawk's `Disassembler.cs` |
 | `audioResampler.hpp` / `audioKernel.hpp` | band-limited step resampler and its kernel |
 | `tools/gen-*.py` | the generators for the three headers above |
-| `build-core.sh` | builds `core.wbx` plus the three drivers |
+| `setup-guest.sh` | writes the meson cross file for miniBox's guest toolchain and configures `build/meson-guest` |
 | `build-package.sh` | builds the package and installs it into a miniHawk checkout |
 | `run-native.cpp` / `run-wbx.c` | the equivalence gate: the same rom and inputs through the host build and the sandbox |
+| `../meson.build` | both builds: a cross configure is the guest (`core.wbx`), a native one is the reference plus the drivers and the core's own tools |
 | `run-tooling.c` | exercises the optional tooling exports the way the frontend probes them |
 | `tests/` | the frontend gate: the package running inside miniHawk |
 

@@ -63,8 +63,17 @@ jobs:
           [ -f "$mb/build/meson-cpp/build.ninja" ] || meson setup "$mb/build/meson-cpp" "$mb" -Dguest_cpp=true
           meson compile -C "$mb/build/meson-cpp"
 
-      - name: Build the waterbox core and the drivers
-        run: ./waterbox/build-core.sh -m "$PWD/minihawk-checkout/extern/tools/chimera-common-minibox"
+      - name: Build the native reference and the sandbox drivers
+        run: |
+          mb="$PWD/minihawk-checkout/extern/tools/chimera-common-minibox"
+          meson setup build/meson-native "-Dminibox_dir=$mb"
+          ninja -C build/meson-native
+
+      - name: Build the waterbox core
+        run: |
+          mb="$PWD/minihawk-checkout/extern/tools/chimera-common-minibox"
+          sh waterbox/setup-guest.sh -m "$mb"
+          ninja -C build/meson-guest core.wbx
 
       - name: Core gate over the free-to-distribute roms
         run: ./waterbox/run-gate.sh
@@ -132,6 +141,12 @@ jobs:
           mb="$PWD/minihawk-checkout/extern/tools/chimera-common-minibox"
           [ -f "$mb/build/meson-cpp/build.ninja" ] || meson setup "$mb/build/meson-cpp" "$mb" -Dguest_cpp=true
           meson compile -C "$mb/build/meson-cpp"
+
+      - name: Build the native reference (the gate's comparison side)
+        run: |
+          mb="$PWD/minihawk-checkout/extern/tools/chimera-common-minibox"
+          meson setup build/meson-native "-Dminibox_dir=$mb"
+          ninja -C build/meson-native run-native
 
       - name: Build and install the waterbox core package
         # The commit is the core's authoritative version: this build is the one that

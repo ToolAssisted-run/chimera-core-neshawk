@@ -42,7 +42,8 @@ emu_hawk="$minihawk_root/build/Chimera.exe"
 package="$minihawk_root/build/Cores/quickerneshawk.zip"
 [ -f "$emu_hawk" ] || { echo "EmuHawk not built: $emu_hawk" >&2; exit 1; }
 [ -f "$package" ] || { echo "package not installed: $package (run ../build-package.sh)" >&2; exit 1; }
-[ -x "$wb/bin/run-native" ] || { echo "native reference not built (run ../build-core.sh)" >&2; exit 1; }
+nat="$wb/../build/meson-native"
+[ -x "$nat/run-native" ] || { echo "native reference not built: meson setup build/meson-native && ninja -C build/meson-native" >&2; exit 1; }
 
 work="$here/work"
 mkdir -p "$work"
@@ -112,7 +113,7 @@ for rom in "${roms[@]}"; do
 	settings_config "$work/config.$name.ini" '{}'
 
 	# --- the machine the frontend builds must be the one the core-level gate signed off on ---
-	if ! "$wb/bin/run-native" "$rom" "$frames" --blank > "$work/$name.native.txt" 2>"$work/$name.native.err"; then
+	if ! "$nat/run-native" "$rom" "$frames" --blank > "$work/$name.native.txt" 2>"$work/$name.native.err"; then
 		report "$name:frontend" FAIL "native runner error: $(head -1 "$work/$name.native.err")"; continue
 	fi
 	if ! run_frontend "$name.base" "$work/config.$name.ini" "$frames" "$work/$name.base.png"; then
