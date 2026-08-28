@@ -11,6 +11,17 @@
         "fds"
       ],
       "help": "The game: an iNES cartridge image (.nes), or a Famicom Disk System image (.fds) - a disk makes the FDS BIOS a firmware requirement on the next wizard page, where a cartridge needs none."
+    },
+    {
+      "id": "savedata",
+      "title": "Save data",
+      "min": 0,
+      "max": 1,
+      "formats": [
+        "sav",
+        "srm"
+      ],
+      "help": "What the machine starts with already saved. This is the file Emulator > Export Save Data... writes - battery.sav on a cartridge with a battery, disk.sav on a Famicom Disk System, where what is saved is how the disk differs from the one loaded. It is mounted read-only and pinned by hash, and the movie cites it, so a movie that starts from a saved game is as reproducible as one that starts fresh. A machine that keeps no saves - no battery, no disk - will say so rather than load one."
     }
   ]
 }

@@ -314,10 +314,96 @@ ECL_EXPORT int Init(void)
 	g_nes->sampleCallback = onSample;
 	g_nes->sampleCallbackCtx = &g_resampler;
 
+	/* What the cartridge starts with already saved.
+	 *
+	 * NesHawk already knows what a save is for this machine: battery-backed
+	 * WRAM on a cartridge, and the difference from the disk as loaded on an
+	 * FDS. The file the project mounted goes in through that same door, here -
+	 * after the machine is built, so the memory exists, and inside Init, so it
+	 * is part of the sealed baseline rather than of every savestate.
+	 *
+	 * A machine that keeps no saves refuses one rather than quietly ignoring
+	 * it: a project carrying someone's progress that never loads is worse than
+	 * one that will not start. */
+	{
+		char saveName[256] = "";
+		if (wbx_slot_first("savedata", saveName, sizeof saveName))
+		{
+			if (!g_nes->board->HasSaveRam())
+			{
+				snprintf(g_loadError, sizeof g_loadError,
+					"this machine keeps no saves - it has no battery and no disk - so "
+					"'%s' would not be read.", saveName);
+				return 0;
+			}
+			FILE *sf = fopen(saveName, "rb");
+			if (sf == nullptr)
+			{
+				snprintf(g_loadError, sizeof g_loadError, "could not open '%s'", saveName);
+				return 0;
+			}
+			std::vector<uint8_t> bytes;
+			uint8_t chunk[16 * 1024];
+			size_t got;
+			while ((got = fread(chunk, 1, sizeof chunk, sf)) > 0)
+				bytes.insert(bytes.end(), chunk, chunk + got);
+			fclose(sf);
+			try
+			{
+				g_nes->board->StoreSaveRam(bytes.data(), bytes.size());
+			}
+			catch (const std::exception &e)
+			{
+				snprintf(g_loadError, sizeof g_loadError, "'%s' does not fit this machine: %s",
+					saveName, e.what());
+				return 0;
+			}
+		}
+	}
+
 	// the non-sync settings were mounted alongside the sync ones, so the machine starts at the
 	// user's chosen values rather than at the package defaults
 	applyLiveSettings();
 	return 1;
+}
+
+/* ---- save data (guest ABI: the savedata group) ----
+ *
+ * The user's way out, and the shape the savedata slot expects back. NesHawk
+ * decides what a save IS for this machine - battery WRAM on a cartridge, the
+ * difference from the disk as loaded on an FDS - so the name says which.
+ *
+ * docs/save-data.md said a core whose saves are plain machine memory need not
+ * export the group, since savestates already carry them. True of REPRODUCTION,
+ * false of the user: without this there is no way to take a saved game out of
+ * the machine, and no way to start another project from it. The snapshot is
+ * taken on Count(), as the ABI requires, because ReadSaveRam builds it. */
+static std::vector<uint8_t> g_saveDataSnapshot;
+
+ECL_EXPORT int32_t GetSaveDataFileCount(void)
+{
+	if (g_nes == nullptr || !g_nes->board->HasSaveRam())
+		return 0;
+	g_saveDataSnapshot = g_nes->board->ReadSaveRam();
+	return g_saveDataSnapshot.empty() ? 0 : 1;
+}
+
+ECL_EXPORT const char *GetSaveDataFileName(int32_t i)
+{
+	if (i != 0 || g_nes == nullptr)
+		return nullptr;
+	/* the disk system saves what changed on the disk; a cartridge saves its battery */
+	return g_nes->board->kind == nesHawk::NesBoard::Kind::FDS ? "disk.sav" : "battery.sav";
+}
+
+ECL_EXPORT int64_t GetSaveDataFileSize(int32_t i)
+{
+	return i == 0 ? (int64_t)g_saveDataSnapshot.size() : 0;
+}
+
+ECL_EXPORT const uint8_t *GetSaveDataFileBuffer(int32_t i)
+{
+	return i == 0 ? g_saveDataSnapshot.data() : nullptr;
 }
 
 /* ---- live (non-sync) settings ----

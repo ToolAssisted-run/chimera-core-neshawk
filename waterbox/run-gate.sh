@@ -132,6 +132,48 @@ for rom in "${roms[@]}"; do
 	fi
 done
 
+# ---- save data: out, and back in -------------------------------------------
+#
+# A machine that keeps saves - a cartridge with a battery, or a disk system -
+# hands them out through the savedata channel (what Export Save Data writes)
+# and takes them back through the savedata slot (what a project mounts). Proved
+# with a save the machine could not have written; the battery-flagged sprilo
+# the bundle legs already build is the cart.
+batt="$work/sprilo.battery.nes"
+if [ ! -f "$batt" ]; then
+	python3 - "$here/roms/sprilo.nes" "$batt" <<'PYBATT'
+import sys
+d = bytearray(open(sys.argv[1], 'rb').read())
+d[6] |= 0x02          # iNES flags 6, bit 1: battery-backed save RAM
+open(sys.argv[2], 'wb').write(bytes(d))
+PYBATT
+fi
+"$nat/run-wbx" "$gst/core.wbx" "$batt" 60 --savedata-out "$work/nh.sav" >/dev/null 2>&1
+if [ ! -s "$work/nh.sav" ]; then
+	report "savedata:export" FAIL "a battery cart exported nothing"
+else
+	report "savedata:export" PASS "$(stat -c%s "$work/nh.sav") bytes of battery WRAM left through the channel"
+	python3 - "$work/nh.sav" "$work/nh-seed.sav" <<'PYSEED'
+import sys
+d = bytearray(open(sys.argv[1], 'rb').read())
+d[0:16] = b'CHIMERA-SEED-TST'
+open(sys.argv[2], 'wb').write(bytes(d))
+PYSEED
+	"$nat/run-wbx" "$gst/core.wbx" "$batt" 60 --savedata-in "$work/nh-seed.sav" \
+		--savedata-out "$work/nh-back.sav" >/dev/null 2>&1
+	if ! head -c 16 "$work/nh-back.sav" 2>/dev/null | grep -q "CHIMERA-SEED-TST"; then
+		report "savedata:seeded" FAIL "the save the project supplied did not reach the machine"
+	else
+		report "savedata:seeded" PASS "a save the project supplied reached the machine and returned"
+	fi
+	if "$nat/run-wbx" "$gst/core.wbx" "$here/roms/sprilo.nes" 10 \
+		--savedata-in "$work/nh-seed.sav" >/dev/null 2>&1; then
+		report "savedata:refused" FAIL "a machine that keeps no saves accepted save data"
+	else
+		report "savedata:refused" PASS "a machine that keeps no saves refuses save data"
+	fi
+fi
+
 echo ""
 echo "$ok ok, $failed failed"
 [ "$failed" -gt 0 ] && exit 1
