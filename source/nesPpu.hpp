@@ -794,9 +794,17 @@ class PPU
   // experimental
   int pixelcolor_latch_1 = 0;
 
+  // Turbo: the caller has said nobody will look at this frame. The pipeline is
+  // the ONLY thing that writes xbuf, and the sprite-zero hit is decided
+  // elsewhere (nes.hpp, from the sprite pattern and the raster position), so a
+  // frame with this off is the same machine with no picture. It is the runtime
+  // twin of NESHAWK_HEADLESS, which is the same claim made at compile time.
+  bool render_enabled = true;
+
   void pipeline(int pixelcolor, int row_check)
   {
 #ifndef NESHAWK_HEADLESS
+    if (!render_enabled) return;
     if (row_check > 0)
     {
       if (reg_2001.color_disable)

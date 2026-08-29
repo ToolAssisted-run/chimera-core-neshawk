@@ -43,6 +43,9 @@ fi
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 digests() { grep -E '^(frames|videoHash|audioHash|lagFrames|domain\[)'; }
+# What a turbo run can be held to: everything except the accumulated per-frame video hash,
+# which a run that skipped drawing cannot possibly match.
+turboDigests() { grep -E '^(frames|tailVideoHash|audioHash|lagFrames|domain\[)'; }
 
 ok=0
 failed=0
@@ -78,6 +81,21 @@ for rom in "${roms[@]}"; do
 		report "$name:savestate" PASS "per-frame round-trip is lossless"
 	else
 		report "$name:savestate" FAIL "$(diff "$work/box.txt" "$work/rr.txt" | tr '\n' ' ' | head -c 120)"
+	fi
+
+	# Turbo: the same frames with the core's drawing switched off, and switched back on for the last
+	# one. The machine, the sound, the lag count and the picture of that last frame must all be what
+	# they would have been. A core that got this wrong shows up here as a different final picture
+	# even when every byte of RAM still agrees.
+	if "$nat/run-wbx" "$gst/core.wbx" "$rom" "$frames" 2>/dev/null | turboDigests > "$work/norm.txt" &&
+	   "$nat/run-wbx" "$gst/core.wbx" "$rom" "$frames" --turbo 2>/dev/null | turboDigests > "$work/turbo.txt"; then
+		if cmp -s "$work/norm.txt" "$work/turbo.txt"; then
+			report "$name:turbo" PASS "$frames frames, half of them undrawn, same machine and same pictures"
+		else
+			report "$name:turbo" FAIL "$(diff "$work/norm.txt" "$work/turbo.txt" | tr '\n' ' ' | head -c 120)"
+		fi
+	else
+		report "$name:turbo" FAIL "turbo runner error"
 	fi
 
 	# Save files, when the machine has one: what the core writes out has to be what a fresh machine

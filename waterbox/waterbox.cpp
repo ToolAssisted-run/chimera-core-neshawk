@@ -39,6 +39,13 @@ namespace
 
 	nesHawk::NES *g_nes = nullptr;
 	uint32_t g_video[FbWidth * FbHeight];
+
+	/* Turbo. The host sets this to 0 when nobody is going to look at the frame,
+	 * and the PPU stops writing pixels. It is host policy rather than machine
+	 * state, so it lives outside the savestate; the PPU's own copy of it is
+	 * inside the savestate, which is why FrameAdvance re-asserts it from here
+	 * every frame rather than trusting what a loaded state left behind. */
+	ECL_INVISIBLE int g_render = 1;
 	int16_t g_audio[MaxSamplesPerFrame];
 	int g_audioSamples = 0;
 
@@ -363,28 +370,34 @@ ECL_EXPORT void FrameAdvance(uint64_t input)
 			if ((input >> (18 + side)) & 1) fds.InsertSide(side);
 		}
 	}
+	g_nes->ppu->render_enabled = g_render != 0;
 	g_nes->FrameAdvance(pad1, pad2);
 
 	// Video: NesHawk's own framebuffer walk (NES.cs MyVideoProvider.FillFrameBuffer). xbuf holds a
 	// 6-bit colour plus the 3 emphasis bits, and bit 15 marks a pixel the PPU did not draw, which
 	// the backdrop colour replaces when one is set. Rows and columns outside the configured crop
 	// are blanked rather than cut, because a package declares one fixed frame size.
-	const bool useBackdrop = g_backgroundColor >= 0;
-	const uint32_t backdrop = useBackdrop ? (0xFF000000u | (uint32_t)g_backgroundColor) : 0xFF000000u;
-	const int left = g_clipLeftAndRight ? 8 : 0;
-	const int right = g_clipLeftAndRight ? 247 : 255;
-	const int16_t *src = g_nes->ppu->xbuf;
-	for (int y = 0; y < FbHeight; y++)
+	// In turbo the PPU wrote no pixels, so there is nothing to walk and the
+	// buffer keeps the last frame that was drawn.
+	if (g_render)
 	{
-		const bool rowVisible = y >= g_topLine && y <= g_bottomLine;
-		for (int x = 0; x < FbWidth; x++)
+		const bool useBackdrop = g_backgroundColor >= 0;
+		const uint32_t backdrop = useBackdrop ? (0xFF000000u | (uint32_t)g_backgroundColor) : 0xFF000000u;
+		const int left = g_clipLeftAndRight ? 8 : 0;
+		const int right = g_clipLeftAndRight ? 247 : 255;
+		const int16_t *src = g_nes->ppu->xbuf;
+		for (int y = 0; y < FbHeight; y++)
 		{
-			const int16_t pixel = src[(y << 8) + x];
-			uint32_t out;
-			if (!rowVisible || x < left || x > right) out = 0xFF000000u;
-			else if ((pixel & 0x8000) != 0 && useBackdrop) out = backdrop;
-			else out = g_paletteCompiled[pixel & 0x1FF];
-			g_video[y * FbWidth + x] = out;
+			const bool rowVisible = y >= g_topLine && y <= g_bottomLine;
+			for (int x = 0; x < FbWidth; x++)
+			{
+				const int16_t pixel = src[(y << 8) + x];
+				uint32_t out;
+				if (!rowVisible || x < left || x > right) out = 0xFF000000u;
+				else if ((pixel & 0x8000) != 0 && useBackdrop) out = backdrop;
+				else out = g_paletteCompiled[pixel & 0x1FF];
+				g_video[y * FbWidth + x] = out;
+			}
 		}
 	}
 
@@ -393,6 +406,12 @@ ECL_EXPORT void FrameAdvance(uint64_t input)
 	g_nes->apu->sampleclock = 0;
 	g_audioSamples = g_resampler.ReadSamples(g_audio, MaxSamplesPerFrame);
 }
+
+/* Turbo (optional guest ABI group): while off the core must produce no picture
+ * and must otherwise be exactly the machine it would have been. run-gate.sh's
+ * turbo leg is the proof - N undrawn frames plus one drawn one come out byte for
+ * byte the same machine, and the same picture, as N+1 drawn ones. */
+ECL_EXPORT void SetRenderingEnabled(int on) { g_render = on != 0; }
 
 ECL_EXPORT uint32_t *GetVideoBgra(void) { return g_video; }
 ECL_EXPORT int16_t *GetAudio(void) { return g_audio; }

@@ -2,10 +2,15 @@
  * over a rom and reports per-frame video/audio/RAM digests, so the sandboxed build can be compared
  * against the same core built natively on the same inputs.
  *
- * usage: run-wbx <core.wbx> <rom.nes> <frames> [--rerecord] [--blank] [--settings <file.json>]
+ * usage: run-wbx <core.wbx> <rom.nes> <frames> [--rerecord] [--turbo] [--blank] [--settings <file.json>]
  *
  * --rerecord round-trips the WHOLE guest machine through the host's save/load state around every
  *   frame; the digests must be identical either way.
+ * --turbo runs the first half of the frames with the core's drawing switched off, then switches it
+ *   back on for the second half. Everything except the whole-run video hash must come out identical
+ *   to a plain run - including the pictures of that second half, which is the interesting part: it
+ *   proves the machine the undrawn frames left behind is the machine that would have been there
+ *   anyway, right down to what it draws.
  * --blank holds every button released, matching run-native --blank.
  * NESHAWK_FDS_BIOS, when set, is mounted as the "bios" firmware file the package declares - the
  * same channel the frontend uses, so a disk image runs here too.
@@ -63,6 +68,7 @@ static uint8_t padForFrame(long frame)
 }
 
 typedef int (MB_GUEST_ABI *intfn)(void);
+typedef void (MB_GUEST_ABI *voidfn_i)(int);
 typedef void (MB_GUEST_ABI *framefn)(uint64_t);
 typedef uintptr_t (MB_GUEST_ABI *ptrfn)(void);
 typedef uintptr_t (MB_GUEST_ABI *ptrfn_i)(int);
@@ -96,16 +102,17 @@ static uint8_t *slurp(const char *p, long *n)
 int main(int argc, char **argv)
 {
 	const char *wbxPath = 0, *romPath = 0, *settingsPath = 0;
-	long frames = 60; int rerecord = 0, blank = 0;
+	long frames = 60; int rerecord = 0, blank = 0, turbo = 0;
 	for (int i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "--rerecord")) rerecord = 1;
+		else if (!strcmp(argv[i], "--turbo")) turbo = 1;
 		else if (!strcmp(argv[i], "--blank")) blank = 1;
 		else if (!strcmp(argv[i], "--settings") && i + 1 < argc) settingsPath = argv[++i];
 		else if (!wbxPath) wbxPath = argv[i];
 		else if (!romPath) romPath = argv[i];
 		else frames = strtol(argv[i], 0, 0);
 	}
-	if (!wbxPath || !romPath) { fprintf(stderr, "usage: run-wbx <core.wbx> <rom.nes> <frames> [--rerecord] [--blank] [--settings <file.json>]\n"); return 2; }
+	if (!wbxPath || !romPath) { fprintf(stderr, "usage: run-wbx <core.wbx> <rom.nes> <frames> [--rerecord] [--turbo] [--blank] [--settings <file.json>]\n"); return 2; }
 
 	long romLen = 0;
 	uint8_t *rom = slurp(romPath, &romLen);
@@ -177,10 +184,19 @@ int main(int argc, char **argv)
 	if (r.error_message[0]) { fprintf(stderr, "seal: %s\n", r.error_message); return 1; }
 	wbx_activate_host(h, &r);
 
+	voidfn_i SetRenderingEnabled = (voidfn_i)tryproc(h, "SetRenderingEnabled");
+	if (turbo && !SetRenderingEnabled) { fprintf(stderr, "core exports no SetRenderingEnabled\n"); return 3; }
+
 	uint64_t vh = 0, ah = 0;
+	/* the second half of the run, hashed separately: see the turbo hook */
+	const long tail = frames / 2;
+	uint64_t th = 0;
 	long lag = 0;
 	membuf st = {0};
 	for (long f = 0; f < frames; f++) {
+		/* turbo: draw nothing for the first half of the run, then draw the second half normally -
+		 * those are the pictures the turbo leg compares */
+		if (turbo) SetRenderingEnabled(f >= tail);
 		if (rerecord) {
 			/* No deactivate/activate bracket: the host activates itself for the
 			 * duration and restores what it found. Bracketing it unmaps and remaps
@@ -195,6 +211,7 @@ int main(int argc, char **argv)
 		/* the guest does its own packing from this mask - see waterbox.cpp */
 		FrameAdvance(blank ? 0 : (uint64_t)padForFrame(f));
 		vh = fnv(vh, (const void *)GetVideoBgra(), 256 * 240 * 4);
+		if (f >= tail) th = fnv(th, (const void *)GetVideoBgra(), 256 * 240 * 4);
 		ah = fnv(ah, (const void *)GetAudio(), (size_t)GetAudioSampleCount() * 2);
 		/* lag is emulation-visible state too: a build with joypad-read detection
 		 * compiled out reports every frame as lag, and RAM alone never notices */
@@ -203,6 +220,7 @@ int main(int argc, char **argv)
 
 	printf("frames=%ld\n", frames);
 	printf("videoHash=%016llx\n", (unsigned long long)vh);
+	printf("tailVideoHash=%016llx\n", (unsigned long long)th);
 	printf("audioHash=%016llx\n", (unsigned long long)ah);
 	printf("lagFrames=%ld\n", lag);
 	for (int i = 0; i < nd; i++) {
