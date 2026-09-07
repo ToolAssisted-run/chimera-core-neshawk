@@ -24,14 +24,21 @@ nesHawkDependency = declare_dependency(
 
 # miniBox provides the guest kit headers for the guest and the host library the
 # sandbox drivers load. It lives outside this tree, so it arrives as a path.
+#
+# Only two things need it: the guest (core.wbx) and the sandbox drivers that load
+# the guest. The header-only core, the native reference and the standalone tools
+# are self-contained, so a plain `meson setup build` with no miniBox in sight
+# still configures them and still runs the cpuFuzz regression. Without one the
+# drivers are simply not defined, and anything that asks for them by name fails
+# loudly rather than silently comparing against nothing.
 mb = get_option('minibox_dir')
 if mb == ''
   mb_candidate = meson.current_source_dir() / '../chimera/extern/chimera-common-minibox'
   if import('fs').is_dir(mb_candidate)
     mb = mb_candidate
-  else
-    error('pass -Dminibox_dir=<miniBox checkout> (or keep one at ../chimera/extern/chimera-common-minibox)')
   endif
+elif not import('fs').is_dir(mb)
+  error('-Dminibox_dir=' + mb + ' is not a directory')
 endif
 
 # NESHAWK_FULL_AV is the important one: the core defaults to HEADLESS, which
@@ -77,12 +84,17 @@ else
     include_directories: include_directories('source', 'waterbox'),
     cpp_args: core_args)
 
-  mbhost = mb / 'build/meson-cpp/source/host'
-  foreach driver : ['run-wbx', 'run-tooling']
-    executable(driver, files('waterbox' / driver + '.c'),
-      c_args: ['-I' + mb / 'source/host'],
-      link_args: [mbhost / 'libminiboxhost.so', '-Wl,-rpath,' + mbhost])
-  endforeach
+  if mb == ''
+    warning('no miniBox checkout: run-wbx and run-tooling are not built. ' +
+            'Pass -Dminibox_dir=<miniBox checkout> to build the sandbox drivers.')
+  else
+    mbhost = mb / 'build/meson-cpp/source/host'
+    foreach driver : ['run-wbx', 'run-tooling']
+      executable(driver, files('waterbox' / driver + '.c'),
+        c_args: ['-I' + mb / 'source/host'],
+        link_args: [mbhost / 'libminiboxhost.so', '-Wl,-rpath,' + mbhost])
+    endforeach
+  endif
 
   # ---- the core's own tools -------------------------------------------------
   # Standalone drivers. Building them is itself a compile-check of the translated core; cpuFuzz is
