@@ -87,12 +87,27 @@ for rom in "${roms[@]}"; do
 	# one. The machine, the sound, the lag count and the picture of that last frame must all be what
 	# they would have been. A core that got this wrong shows up here as a different final picture
 	# even when every byte of RAM still agrees.
-	if "$nat/run-wbx" "$gst/core.wbx" "$rom" "$frames" 2>/dev/null | turboDigests > "$work/norm.txt" &&
-	   "$nat/run-wbx" "$gst/core.wbx" "$rom" "$frames" --turbo 2>/dev/null | turboDigests > "$work/turbo.txt"; then
-		if cmp -s "$work/norm.txt" "$work/turbo.txt"; then
-			report "$name:turbo" PASS "$frames frames, half of them undrawn, same machine and same pictures"
-		else
+	#
+	# And the first half really must have gone undrawn. The comparison alone is blind to that: it is
+	# held over tailVideoHash, the second half only, so a SetRenderingEnabled that did nothing at all
+	# would leave every compared digest identical and this leg would report "half of them undrawn"
+	# about a run that drew every frame. Stubbing that export to a no-op in the sibling stella core,
+	# which carries the same harness, gave a fully green gate. The whole-run videoHash covers the
+	# first half too, so the two runs cannot agree on it unless the picture was never switched off.
+	if "$nat/run-wbx" "$gst/core.wbx" "$rom" "$frames" 2>/dev/null > "$work/norm.raw" &&
+	   "$nat/run-wbx" "$gst/core.wbx" "$rom" "$frames" --turbo 2>/dev/null > "$work/turbo.raw"; then
+		turboDigests < "$work/norm.raw" > "$work/norm.txt"
+		turboDigests < "$work/turbo.raw" > "$work/turbo.txt"
+		nvh="$(grep -m1 '^videoHash=' "$work/norm.raw")"
+		tvh="$(grep -m1 '^videoHash=' "$work/turbo.raw")"
+		if ! cmp -s "$work/norm.txt" "$work/turbo.txt"; then
 			report "$name:turbo" FAIL "$(diff "$work/norm.txt" "$work/turbo.txt" | tr '\n' ' ' | head -c 120)"
+		elif [ -z "$nvh" ] || [ -z "$tvh" ]; then
+			report "$name:turbo" FAIL "no whole-run videoHash to tell a skipped frame from a drawn one"
+		elif [ "$nvh" = "$tvh" ]; then
+			report "$name:turbo" FAIL "the turbo run drew every frame - nothing was skipped"
+		else
+			report "$name:turbo" PASS "$frames frames, half of them really undrawn, same machine and same pictures"
 		fi
 	else
 		report "$name:turbo" FAIL "turbo runner error"
@@ -101,9 +116,18 @@ for rom in "${roms[@]}"; do
 	# Save files, when the machine has one: what the core writes out has to be what a fresh machine
 	# takes back in. A disk or a battery cart that reloaded a save differently would lose the save
 	# silently, which is the one failure a user cannot notice until it is too late.
+	#
+	# This has never run. It skipped saying "this machine has nothing to save", which is true of
+	# sprilo and is not why: run-wbx has no --saveram-out and no --saveram-in. It takes only
+	# --rerecord, --turbo, --blank and --settings, and it accepts any other flag in silence and
+	# exits 0, so the leg asked a runner that cannot answer and read the missing answer as a
+	# cartridge with no battery. The two look identical from here, which is the whole trouble, so
+	# the two are now told apart: no saveRamBytes line at all means the channel is not there.
 	if "$nat/run-wbx" "$gst/core.wbx" "$rom" "$frames" --saveram-out "$work/sram.bin" > "$work/sram.txt" 2>&1; then
 		sram_bytes="$(grep -o 'saveRamBytes=[0-9]*' "$work/sram.txt" | cut -d= -f2)"
-		if [ "${sram_bytes:-0}" -eq 0 ]; then
+		if [ -z "$sram_bytes" ]; then
+			report "$name:saveram" SKIP "run-wbx has no saveram channel - it ignored --saveram-out and reported no saveRamBytes"
+		elif [ "$sram_bytes" -eq 0 ]; then
 			report "$name:saveram" SKIP "this machine has nothing to save"
 		elif ! "$nat/run-wbx" "$gst/core.wbx" "$rom" 0 --saveram-in "$work/sram.bin" \
 			--saveram-out "$work/sram.rt.bin" > /dev/null 2>&1; then
@@ -117,14 +141,26 @@ for rom in "${roms[@]}"; do
 		report "$name:saveram" FAIL "save file runner error"
 	fi
 
-	# The optional tooling exports the frontend probes for: absence is allowed, but a core that
-	# claims a surface must render one.
+	# The tooling exports the frontend probes for. This core HAS all four families - surfaces,
+	# registers, buses and a trace - so "not supported by this core" is never the truth here, it is
+	# the answer run-tooling gives when a symbol will not resolve. A thunk pool that runs dry, a
+	# rename, a dropped ECL_EXPORT: all of them read as absence, and absence used to be allowed. It
+	# was allowed so completely that in the sibling quickernes core, renaming GetSurfaceCount,
+	# GetRegisterCount and GetBusCount all at once still reported PASS, with "0 tooling entries" in
+	# the detail nobody reads. So the leg now insists that every family answers, and that something
+	# came back.
 	if [ -x "$nat/run-tooling" ]; then
 		if "$nat/run-tooling" "$gst/core.wbx" "$rom" 120 > "$work/tool.txt" 2>&1; then
+			entries="$(grep -c '^  \[' "$work/tool.txt")"
+			missing="$(grep 'not supported by this core' "$work/tool.txt" | cut -d: -f1 | tr '\n' ' ')"
 			if grep -q "RENDER FAILED" "$work/tool.txt"; then
 				report "$name:tooling" FAIL "a declared surface did not render"
+			elif [ -n "$missing" ]; then
+				report "$name:tooling" FAIL "the core stopped answering for: ${missing% }"
+			elif [ "$entries" -eq 0 ]; then
+				report "$name:tooling" FAIL "every family answered but listed nothing"
 			else
-				report "$name:tooling" PASS "$(grep -c '^  \[' "$work/tool.txt") tooling entries reported"
+				report "$name:tooling" PASS "$entries tooling entries reported, all four families answering"
 			fi
 		else
 			report "$name:tooling" FAIL "runner error"
