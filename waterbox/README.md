@@ -1,8 +1,10 @@
-# QuickerNesHawk as a miniHawk waterbox core
+# QuickerNesHawk as a Chimera waterbox core
 
-A miniHawk core package is exactly two files — `core.wbx` (the sandboxed guest binary) and
-`waterbox.config` — loaded by miniHawk's one built-in generic adapter. There is no managed
-assembly and no native library in a package.
+A Chimera core package is `core.wbx` (the sandboxed guest binary) and what declares it -
+`waterbox.config`, the default keybindings, the file slots, the licences and a `build.json` -
+loaded by Chimera's one built-in generic adapter (Chimera was called miniHawk when this was
+written, and file names here still say so). There is no managed assembly and no native library
+in a package.
 
 The emulation source under [`../source`](../source) is untouched by the sandbox: the same headers
 build for the host and for the guest, and the gate below requires the two to agree byte for byte.
@@ -157,8 +159,9 @@ dumps are file-system level - gaps, block markers and CRCs stripped - so the phy
 rebuilt on insert, exactly as NesHawk does it. Both dump shapes load, headered and raw.
 
 - **The BIOS is firmware the package declares** (`"firmware": [{ "id": "bios", ... }]`) and the
-  frontend mounts it under that id, like the rom. It is declared optional, because a cartridge does
-  not need it; a disk image without it is refused by the core with a message saying so.
+  frontend mounts it under that id, like the rom. It is required only when the machine is `fds`
+  (`requiredWhen`, one declaration per `fdsBios` choice), because a cartridge does not need it; a
+  disk image without it is refused by the core with a message saying so.
 - **Disk buttons**: `FDS Eject` and `FDS Insert 0..3`. NesHawk declares one Insert per side of the
   loaded image; a package's controller is fixed, so four are always declared and the ones the image
   has no side for do nothing. Both are level triggered, as in NesHawk - holding Insert re-seats the
