@@ -8,6 +8,18 @@ runtime, no marshalling) into native tools such as [JaffarPlus](https://github.c
 where a *ground-truth* NES core is needed to confirm that search results hold on the reference
 emulator rather than on a faster approximation.
 
+## Chimera core
+
+This repository is also the QuickerNesHawk core of [Chimera](https://github.com/ToolAssisted-run/chimera),
+a frontend for tool-assisted speedruns; the port lives in [`waterbox/`](waterbox). The core is one
+file, `quickerneshawk.chimeraCore`. Chimera downloads nothing: get the package from this
+repository's [Releases](https://github.com/ToolAssisted-run/chimera-core-neshawk/releases) page, or
+build it, and put it in Chimera's `Cores` folder (the folder beside `Chimera.exe`, or the one chosen
+in File > Core Manager > Change folder...). File > Core Manager lists what is there.
+
+- [docs/BUILDING.md](docs/BUILDING.md) - how to build the package, install it and run its gates.
+- [AGENTS.md](AGENTS.md) - an operating guide for an AI coding agent working in this repository.
+
 ## Credits & provenance
 
 All emulation logic in this repository derives from **BizHawk's NesHawk core**, authored by the
@@ -65,6 +77,9 @@ This builds the standalone tools in `tools/`:
   savestate save/load round-trip. (These need a NES ROM, which is **not** included.)
 
 Header-only consumers can skip Meson entirely and just `#include "source/nes.hpp"`.
+
+The Chimera core package is a separate build of the same sources: see
+[docs/BUILDING.md](docs/BUILDING.md).
 
 ## Testing
 
