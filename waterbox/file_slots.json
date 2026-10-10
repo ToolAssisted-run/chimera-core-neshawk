@@ -1,5 +1,5 @@
 {
-  "_comment": "The core-declared file form for chimera's project wizard: categories, cardinality (max -1 = unbounded), accepted formats, tooltip help. Chimera renders and enforces; this file decides. Slot ids are what project manifests record.",
+  "_comment": "This file lists the kinds of file a project of this core can hold. Chimera's New Project window is built from it. Each kind is called a slot. A slot has a title, the number of files it takes (min and max, where a max of -1 means no limit), the file extensions it accepts and the help text shown to the user. Chimera shows the form and checks the chosen files against it. A project file records its files under the slot ids used here.",
   "slots": [
     {
       "id": "rom",
@@ -10,7 +10,7 @@
         "nes",
         "fds"
       ],
-      "help": "The game: an iNES cartridge image (.nes), or a Famicom Disk System image (.fds) - a disk makes the FDS BIOS a firmware requirement on the next wizard page, where a cartridge needs none."
+      "help": "The game. It is either a cartridge file in iNES format (.nes) or a Famicom Disk System image (.fds). A disk needs the FDS BIOS, which the next wizard page asks for. A cartridge needs none."
     },
     {
       "id": "savedata",
@@ -21,7 +21,7 @@
         "sav",
         "srm"
       ],
-      "help": "What the machine starts with already saved. This is the file Emulator > Export Save Data... writes - battery.sav on a cartridge with a battery, disk.sav on a Famicom Disk System, where what is saved is how the disk differs from the one loaded. It is mounted read-only and pinned by hash, and the movie cites it, so a movie that starts from a saved game is as reproducible as one that starts fresh. A machine that keeps no saves - no battery, no disk - will say so rather than load one."
+      "help": "The saved game the machine starts with. This is the file that Emulator > Export Save Data... writes. It is battery.sav for a cartridge with a battery, and disk.sav for a Famicom Disk System, where the save is the difference between the disk as it is now and the disk that was loaded. The file is never changed. The project and the movie record exactly which file it was, so a movie that starts from a saved game can be played back by anyone who has the same file. A machine that keeps no saves (no battery and no disk) says so."
     }
   ]
 }
