@@ -188,6 +188,13 @@ namespace
 		((audio::BandLimitedResampler<MaxSamplesPerFrame> *)ctx)->AddDelta(clock, delta);
 	}
 
+	/* Chimera's function for each latch of the controllers (SetInputPollCallback). */
+	ECL_INVISIBLE uintptr_t (*g_inputPoll)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t);
+	void onInputPoll()
+	{
+		if (g_inputPoll != nullptr) g_inputPoll(0, 0, 0, 0, 0, 0);
+	}
+
 	/* Why the last Init refused, in words meant for the person who has to fix it. The host reads
 	 * this through GetLoadError and shows it instead of a stack trace, so a core is the one that
 	 * explains itself: only it knows that this file is a disk image, or that its mapper is not
@@ -313,6 +320,7 @@ ECL_EXPORT int Init(void)
 	g_resampler.SetRates(g_nes->cpuclockrate, SampleRate);
 	g_nes->sampleCallback = onSample;
 	g_nes->sampleCallbackCtx = &g_resampler;
+	g_nes->inputPollCallback = onInputPoll;
 
 	/* What the cartridge starts with already saved.
 	 *
@@ -511,6 +519,14 @@ ECL_EXPORT int GetVsyncDenominator(void) { return g_nes != nullptr ? g_nes->Vsyn
 /* A frame that never polled a controller is a lag frame - NesHawk's own islag (NES.IInputPollable.cs
  * IsLagFrame), which the core sets from the joypad read path. */
 ECL_EXPORT int InputWasRead(void) { return g_nes != nullptr && !g_nes->islag; }
+
+/* Chimera's function to call at each latch of the controllers, so a Lua script's
+ * event.oninputpoll runs there (chimera#344). It is the same callback slot in every session and no
+ * savestate carries it. */
+ECL_EXPORT void SetInputPollCallback(uint64_t fn)
+{
+	g_inputPoll = (uintptr_t (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t))(uintptr_t)fn;
+}
 
 /* --- self-described memory domains (guest ABI v1) --- */
 ECL_EXPORT int GetMemoryDomainCount(void)

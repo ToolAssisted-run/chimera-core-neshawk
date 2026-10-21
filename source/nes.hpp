@@ -148,6 +148,11 @@ class NES
   void (*sampleCallback)(void* ctx, uint32_t clock, int delta) = nullptr;
   void* sampleCallbackCtx = nullptr;
 
+  // NES.Core.cs calls InputCallbacks where a latch of the controllers clears the lag flag; this is
+  // that call, for a frontend that runs something there (a Lua script's event.oninputpoll). Null
+  // unless one is attached.
+  void (*inputPollCallback)() = nullptr;
+
   // ---- power-on (NES.cs Init: the iNES/NES-UNROM path, plus header-driven NROM) ----
   // romFile = full .nes file including the 16-byte iNES header.
   NES(const uint8_t* romFile, size_t romFileSize,
@@ -735,6 +740,7 @@ class NES
     {
       controller_was_latched = true;
       lagged = false;
+      if (inputPollCallback != nullptr) inputPollCallback();
     }
     current_strobe = new_strobe;
   }
