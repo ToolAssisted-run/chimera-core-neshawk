@@ -96,20 +96,34 @@ run_frontend() {
 	} > "$job"
 	rm -f "$work/$tag.ram.bin" "$work/$tag.meta.txt"
 	[ -n "$shot" ] && rm -f "$shot"
+	local project
+	project="$(game_project "$tag" "$cfg" "$package" "$rom")" || { echo "no project made (see tests/work/project.$tag/make.log)" > "$work/$tag.log"; return 1; }
 	( cd "$minihawk_root" && MINIHAWK_JOB="$job" timeout 600 mono "$emu_hawk" --headless \
 		"--config=$cfg" "--core=$package" \
-		"--lua=$here/frontend-ram.lua" "$rom" ) > "$work/$tag.log" 2>&1
+		"--lua=$here/frontend-ram.lua" "--project=$project" ) > "$work/$tag.log" 2>&1
 	[ -f "$work/$tag.meta.txt" ] && grep -q "^status=OK" "$work/$tag.meta.txt"
 }
 
-# settings_config <output config> <sync settings JSON> - the same shape the settings dialog writes
-settings_config() { python3 "$here/settings-config.py" "$config" "$1" "$2"; }
+# settings_config <output config> <sync settings JSON>
+# A game runs only in a project (Chimera, 2026-10-26): each run opens one made
+# of its game with chimera-run --new-project, holding the settings
+# settings_config was given for the config it runs with.
+declare -A settings_of
+settings_config() { cp "$config" "$1"; settings_of["$1"]="$2"; }
+crun="$minihawk_root/build/dll/chimera-run"
+game_project() { # tag, config, package, game: prints the project's path
+	local dir="$work/project.$1" settings="${settings_of[$2]:-}"
+	local pkg="$3" game="$4"
+	local fw=()
+	rm -rf "$dir" && mkdir -p "$dir" && cp "$game" "$dir/"
+	"$crun" --new-project "$dir/$1.chimeraProject" "$pkg" "$dir/$(basename "$game")" \
+		--settings "${settings:-"{}"}" "${fw[@]}" > "$dir/make.log" 2>&1 && echo "$dir/$1.chimeraProject"
+}
 
 for rom in "${roms[@]}"; do
 	name="$(basename "$rom" .nes)"
 	if [ ! -f "$rom" ]; then report "$name" SKIP "rom not found"; continue; fi
 
-	# even the baseline run has to say which core it wants; see settings-config.py
 	settings_config "$work/config.$name.ini" '{}'
 
 	# --- the machine the frontend builds must be the one the core-level gate signed off on ---
