@@ -53,8 +53,8 @@ meson compile -C "$MB/build/meson-cpp"
 
 This repository has no submodules. The first miniBox build downloads the GCC
 source that matches the host gcc (about 84 MB) to build libstdc++ for the
-guest. The frontend gate needs more: Mono, Xvfb, the .NET SDK 8.0 and a built
-Chimera. See `docs/BUILDING.md`.
+guest. The frontend gate needs more: Chimera built with its window
+(Chimera's `tools/ci-chimera.sh` builds it). See `docs/BUILDING.md`.
 
 ## Build
 
@@ -76,9 +76,9 @@ ninja -C build/meson-guest core.wbx
 
 `build-package.sh -r "$CHIMERA"` installs it: `$CHIMERA/build/Cores/` is the
 cores folder of a Chimera source checkout. For a release bundle, copy the
-`.chimeraCore` file into the `Cores` folder beside `Chimera.exe` (or the
-folder chosen in File > Core Manager > Change folder...). Chimera downloads
-nothing. File > Core Manager lists the folder; Refresh List rescans it.
+`.chimeraCore` file into the `cores` folder beside Chimera's program (or the
+folder chosen in Tools > Core Manager... > Change folder...). Chimera downloads
+nothing. Tools > Core Manager... lists the folder; Refresh List rescans it.
 
 A package built by hand is stamped `<commit>+local` (`-dirty` when the tree
 has changes) and is for testing. Only CI sets `CORE_VERSION` and publishes.
@@ -88,7 +88,7 @@ has changes) and is for testing. Only CI sets `CORE_VERSION` and publishes.
 ```sh
 ./waterbox/run-gate.sh                                          # the core gate
 meson test -C build/meson-native                                # the 6502 regression
-./waterbox/tests/run-frontend.sh --minihawk-root "$CHIMERA"     # the frontend gate
+./waterbox/tests/run-frontend.sh --chimera-root "$CHIMERA"     # the frontend gate
 ```
 
 The core gate must end with `0 failed`. It compares the sandboxed core with
@@ -96,7 +96,7 @@ the same sources built for the host (video, audio, lag, memory), round-trips
 a savestate around every frame, and checks turbo, the tooling exports and
 save data. Its `saveram` leg reports SKIP; that is expected.
 
-The frontend gate needs a built Chimera (`$CHIMERA/build/Chimera.exe`), the
+The frontend gate needs Chimera built with its window (`$CHIMERA/build/meson-linux/source/ui/chimera`), the
 installed package and `build/meson-native/run-native`. Every leg must report
 PASS. CI publishes only when the core gate and the frontend gate are green.
 

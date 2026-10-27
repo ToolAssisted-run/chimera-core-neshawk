@@ -16,8 +16,8 @@ Placeholders used below:
 - `<miniBox>` - `<chimera>/extern/chimera-common-minibox`, a git submodule
   of Chimera. It is the sandbox host and the guest toolchain.
 
-The scripts and the workflow say "miniHawk" and "EmuHawk". They mean the
-Chimera checkout and `<chimera>/build/Chimera.exe`: the workflow's "Check out
+The scripts and the workflow say "miniHawk". They mean the Chimera checkout
+and Chimera's window, `<chimera>/build/meson-linux/source/ui/chimera`: the workflow's "Check out
 miniHawk" step checks out `ToolAssisted-run/chimera`, and
 `-r <miniHawk root>` takes `<chimera>`.
 
@@ -32,24 +32,10 @@ sudo apt-get update
 sudo apt-get install -y --no-install-recommends meson ninja-build build-essential python3
 ```
 
-For the frontend gate, which builds all of Chimera (workflow job
-`frontend-gate`):
-
-```sh
-sudo apt-get update
-sudo apt-get install -y --no-install-recommends \
-  meson ninja-build build-essential cmake pkg-config python3 \
-  mono-complete xvfb \
-  libgl1-mesa-dev libx11-dev libxext-dev libasound2-dev
-```
-
-The frontend gate also needs the .NET SDK 8.0. The workflow installs it with
-`actions/setup-dotnet@v4` and `dotnet-version: '8.0'`. By hand, Chimera's
-README gives the command and says why the distribution's SDK is not enough:
-
-```sh
-curl -sSL https://dot.net/v1/dotnet-install.sh | bash -s -- --channel 8.0
-```
+For the frontend gate, which builds Chimera with its window (workflow job
+`frontend-gate`), Chimera's `tools/ci-chimera.sh` installs what that needs (Qt
+6.12, from Qt's own archives with aqt) and builds it; the workflow keeps Qt in
+`~/qt` between runs.
 
 No compiler version is pinned. The build uses the gcc and g++ that
 `build-essential` installs, and the package records that gcc version in its
@@ -98,7 +84,7 @@ Where each script looks for Chimera when it is not told:
 | `waterbox/build-package.sh` | `-r <chimera>`, `-m <miniBox>` (or `MINIBOX_DIR`) | `../chimera` beside `<repo>`, `$HOME/chimera`, `../miniHawk` beside `<repo>`, `$HOME/miniHawk`; miniBox defaults to `<chimera>/extern/chimera-common-minibox` |
 | `waterbox/setup-guest.sh` | `-m <miniBox>` (or `MINIBOX_DIR`) | `$HOME/chimera/extern/chimera-common-minibox` |
 | `meson.build`, native build | `-Dminibox_dir=<miniBox>` | `../chimera/extern/chimera-common-minibox` beside `<repo>`; with neither, the sandbox drivers are not built |
-| `waterbox/tests/run-frontend.sh` | `--minihawk-root <chimera>` | a directory named `miniHawk` beside `<repo>`, then `$HOME/miniHawk` |
+| `waterbox/tests/run-frontend.sh` | `--chimera-root <chimera>` | a directory named `chimera` beside `<repo>`, then `$HOME/chimera` |
 
 The fallbacks differ from script to script. Pass the paths.
 
@@ -212,9 +198,9 @@ gets into Chimera because somebody puts the file there.
   `build-package.sh -r <chimera>` writes the package there, so there is
   nothing else to do.
 - In a release bundle, copy `quickerneshawk.chimeraCore` into the `Cores`
-  folder beside `Chimera.exe` (or into the folder chosen in File > Core
-  Manager > Change folder...).
-- File > Core Manager lists what is in that folder. Refresh List rescans it.
+  folder beside Chimera's program (or into the folder chosen in Tools > Core
+  Manager... > Change folder...).
+- Tools > Core Manager... lists what is in that folder. Refresh List rescans it.
 
 The same package file works on Linux and on Windows. The guest inside it is
 run by Chimera's sandbox (miniBox) on either.
@@ -239,7 +225,7 @@ There are two gates. CI needs both green before it publishes.
 ```
 
 It needs `run-native` and `run-wbx` in `build/meson-native`, and
-`build/meson-guest/core.wbx`, and nothing else: no .NET, no Mono, no X.
+`build/meson-guest/core.wbx`, and nothing else: no Chimera build, no display.
 
 ```
 ./waterbox/run-gate.sh [-n <native build dir>] [-g <guest build dir>] [-f <frames>] [rom...]
@@ -276,37 +262,32 @@ reference. It needs a built Chimera, the installed package and `run-native`.
 Build Chimera as the workflow does:
 
 ```sh
-cd <chimera>
-meson setup build/meson-linux --prefix "$PWD/build" --libdir dll
-meson compile -C build/meson-linux
-meson install -C build/meson-linux
-dotnet build source/gui/Chimera.sln -c Release /nodeReuse:false -p:UseSharedCompilation=false
+<chimera>/tools/ci-chimera.sh
 ```
 
 Then, from `<repo>`:
 
 ```sh
 ./waterbox/build-package.sh -r <chimera>
-./waterbox/tests/run-frontend.sh --minihawk-root <chimera>
+./waterbox/tests/run-frontend.sh --chimera-root <chimera>
 ```
 
 ```
-./waterbox/tests/run-frontend.sh [--minihawk-root <chimera>] [--frames N] [rom...]
+./waterbox/tests/run-frontend.sh [--chimera-root <chimera>] [--frames N] [rom...]
 ```
 
-It starts `<chimera>/build/Chimera.exe` under Mono with `--headless` and the
-package. With `DISPLAY` unset it starts its own Xvfb; with `DISPLAY` set it
-uses that display. The default is 600 frames over `waterbox/roms/sprilo.nes`.
+It starts `<chimera>/build/meson-linux/source/ui/chimera` with `--headless`
+and the package. It needs no display. The default is 600 frames over `waterbox/roms/sprilo.nes`.
 
 | leg | what it proves |
 |---|---|
 | `<rom>:frontend` | after the frames, with nothing pressed, the work RAM is identical to the native reference run (`run-native --blank`) |
 | `<rom>:settings:wram` | a string sync setting (`initialWRamStatePattern`) reaches the guest: the RAM at frame 1 changes |
-| `<rom>:keybinds` | from a configuration that has never seen this controller, the bindings in `default_keybinds.json` become the frontend's defaults |
+| `<rom>:keybinds` | with fresh settings, the machine's bindings (read with `dump-controls.lua`) are the ones in `default_keybinds.json` |
 | `<rom>:settings:region` | `region` set to `pal` reaches the guest: the picture differs from NTSC |
 
 Any result other than PASS counts as failed here, a rom that is not found
-included. The gate picks this core by name in the configuration it writes,
+included. The gate names this core with `--core`,
 because a Chimera install can hold more than one package for the NES. The
 script notes that the `keybinds` leg is decisive only when no other installed
 package declares the same controller, as in CI. Logs and dumps go to
@@ -372,7 +353,7 @@ the gates.
 ## Troubleshooting
 
 - `miniHawk checkout not found; pass -r <path>` (`build-package.sh`) or
-  `pass --minihawk-root <path>` (`run-frontend.sh`): pass the Chimera
+  `pass --chimera-root <path>` (`run-frontend.sh`): pass the Chimera
   checkout. The two scripts do not look in the same places, and
   `run-frontend.sh` does not look for a directory named `chimera`.
 - `miniBox C++ guest toolchain missing under <miniBox>/build/meson-cpp`
@@ -389,14 +370,11 @@ the gates.
 - `packaging is not deterministic` (`build-package.sh`): two packings of the
   same staging directory differed. The package's SHA-1 is the core's
   identity, so the script stops.
-- `EmuHawk not built`, `package not installed` or `native reference not
+- `Chimera not built`, `package not installed` or `native reference not
   built` (`run-frontend.sh`): build Chimera, run `build-package.sh`, build
   `run-native`. The message names the missing file.
-- `Xvfb not found (apt install xvfb)` (`run-frontend.sh`): install `xvfb`.
 - A frontend leg fails with `no OK meta` or `run did not report OK`: read the
-  log it names under `waterbox/tests/work/`. A first run that cannot make its
-  configuration says `config bootstrap failed`; read
-  `waterbox/tests/work/bootstrap.log`.
+  log it names under `waterbox/tests/work/`. A run that does not start leaves its output in that log.
 - A rom is refused at load: an unsupported board or a truncated file. The
   core reports it instead of emulating.
 - The Chimera checkout moved: run `waterbox/setup-guest.sh` again. The cross

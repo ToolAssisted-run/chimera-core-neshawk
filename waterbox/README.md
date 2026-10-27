@@ -58,13 +58,13 @@ digests to come out unchanged; then it checks that every tooling group the core 
 answers. What it proves is that the sandbox changed no emulation — fidelity to the C# NesHawk is a
 different question, answered by [`../harness`](../harness) and [`../test`](../test).
 
-`tests/run-frontend.sh` loads the package in EmuHawk (Mono, on a private Xvfb display), emulates
+`tests/run-frontend.sh` loads the package in Chimera's window (run headless, no display needed), emulates
 with nothing pressed, and requires the resulting work RAM to match the native reference exactly;
 then it changes sync settings the way the settings dialog does and requires the machine to change,
-and starts once from a config that has never seen this controller to check that the bindings the
-package ships become the frontend's defaults.
-It pins `PreferredCores` and the script asserts `emu.getcorename()`, because a miniHawk install can
-easily hold two packages claiming the NES.
+and starts once from settings that have never seen this controller to check that the bindings the
+package ships are the machine's when nobody changed them.
+It names the package with `--core`, because a Chimera install can easily hold two packages claiming
+the NES.
 
 ## What the frontend gets
 

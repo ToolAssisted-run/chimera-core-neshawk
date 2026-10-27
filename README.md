@@ -14,8 +14,8 @@ This repository is also the QuickerNesHawk core of [Chimera](https://github.com/
 a frontend for tool-assisted speedruns; the port lives in [`waterbox/`](waterbox). The core is one
 file, `quickerneshawk.chimeraCore`. Chimera downloads nothing: get the package from this
 repository's [Releases](https://github.com/ToolAssisted-run/chimera-core-neshawk/releases) page, or
-build it, and put it in Chimera's `Cores` folder (the folder beside `Chimera.exe`, or the one chosen
-in File > Core Manager > Change folder...). File > Core Manager lists what is there.
+build it, and put it in Chimera's `cores` folder (the folder beside Chimera's program, or the one chosen
+in Tools > Core Manager... > Change folder...). Tools > Core Manager... lists what is there.
 
 - [docs/BUILDING.md](docs/BUILDING.md) - how to build the package, install it and run its gates.
 - [AGENTS.md](AGENTS.md) - an operating guide for an AI coding agent working in this repository.
