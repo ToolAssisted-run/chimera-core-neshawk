@@ -43,7 +43,7 @@ jobs:
 
   core-gate:
     # The fast half: the sandboxed core must emulate byte-identically to the same sources built for
-    # the host, and survive a savestate round-trip around every frame. No .NET, Mono or X involved.
+    # the host, and survive a savestate round-trip around every frame. No Chimera window or display involved.
     name: core gate (equivalence + savestates)
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -106,8 +106,8 @@ jobs:
           retention-days: 90
 
   frontend-gate:
-    # The other half: the package running inside the real frontend (EmuHawk headless under Mono +
-    # Xvfb, loading it through miniHawk's generic waterbox adapter). The emulated RAM must match the
+    # The other half: the package running inside the real frontend (Chimera's window, run
+    # headless, loading it through the generic waterbox adapter). The emulated RAM must match the
     # native reference, and sync settings must reach the guest. Builds all of miniHawk, so it takes
     # minutes; the core gate gives fast feedback meanwhile.
     name: frontend gate (miniHawk)
@@ -124,29 +124,14 @@ jobs:
           path: minihawk-checkout
           submodules: recursive
 
-      - name: Install build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            meson ninja-build build-essential cmake pkg-config python3 \
-            mono-complete xvfb \
-            libgl1-mesa-dev libx11-dev libxext-dev libasound2-dev
-
-      - name: Set up .NET
-        uses: actions/setup-dotnet@v4
+      - name: Cache Qt
+        uses: actions/cache@v4
         with:
-          dotnet-version: '8.0'
+          path: ~/qt
+          key: qt-6.12.0-linux-aqt-3.3.0
 
-      - name: Build miniHawk native dependencies
-        working-directory: minihawk-checkout
-        run: |
-          meson setup build/meson-linux --prefix "$PWD/build" --libdir dll
-          meson compile -C build/meson-linux
-          meson install -C build/meson-linux
-
-      - name: Build the miniHawk solution
-        working-directory: minihawk-checkout
-        run: dotnet build source/gui/Chimera.sln -c Release /nodeReuse:false -p:UseSharedCompilation=false
+      - name: Build Chimera (the engine, chimera-run and the window)
+        run: minihawk-checkout/tools/ci-chimera.sh "$HOME/qt"
 
       - name: Cache the guest toolchain
         uses: actions/cache@v4
@@ -175,7 +160,7 @@ jobs:
         run: ./waterbox/build-package.sh -r "$PWD/minihawk-checkout"
 
       - name: Frontend gate
-        run: ./waterbox/tests/run-frontend.sh --minihawk-root "$GITHUB_WORKSPACE/minihawk-checkout"
+        run: ./waterbox/tests/run-frontend.sh --chimera-root "$GITHUB_WORKSPACE/minihawk-checkout"
 
       - name: Publish the core package
         # Only from a gate that passed: an artifact nobody vouched for is worse than

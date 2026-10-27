@@ -8,7 +8,7 @@
 # sandbox or codegen problem, never a translation one. Fidelity to the C# NesHawk is a separate
 # question, answered by ../harness and ../test.
 #
-# It needs only gcc, meson and python3 - no .NET, Mono or X.
+# It needs only gcc, meson and python3 - no Chimera window and no display.
 #
 # Usage:
 #   ./run-gate.sh [-n <native build dir>] [-g <guest build dir>] [-f <frames>] [rom...]
