@@ -199,6 +199,11 @@ namespace
 	 * this through GetLoadError and shows it instead of a stack trace, so a core is the one that
 	 * explains itself: only it knows that this file is a disk image, or that its mapper is not
 	 * translated yet. ECL_INVISIBLE - it is a diagnostic, not machine state. */
+/* A text a person reads is a key of languages/en.json, each of its
+ * arguments after a TEXT_ARG (chimera docs/translations.md). TEXT_ARG is a
+ * string of its own so the byte after it is never read as more of its hex. */
+#define TEXT_ARG "\x1f"
+
 	ECL_INVISIBLE char g_loadError[512];
 
 	void setLoadError(const char *what)
@@ -278,7 +283,7 @@ ECL_EXPORT int Init(void)
 	uint8_t *rom = readMounted(romName, &romLen);
 	if (!rom)
 	{
-		setLoadError("no rom was mounted");
+		setLoadError("error.no_file");
 		return 0;
 	}
 
@@ -340,14 +345,13 @@ ECL_EXPORT int Init(void)
 			if (!g_nes->board->HasSaveRam())
 			{
 				snprintf(g_loadError, sizeof g_loadError,
-					"this machine keeps no saves - it has no battery and no disk - so "
-					"'%s' would not be read.", saveName);
+					"error.no_saves" TEXT_ARG "%s", saveName);
 				return 0;
 			}
 			FILE *sf = fopen(saveName, "rb");
 			if (sf == nullptr)
 			{
-				snprintf(g_loadError, sizeof g_loadError, "could not open '%s'", saveName);
+				snprintf(g_loadError, sizeof g_loadError, "error.not_opened" TEXT_ARG "%s", saveName);
 				return 0;
 			}
 			std::vector<uint8_t> bytes;
@@ -362,7 +366,7 @@ ECL_EXPORT int Init(void)
 			}
 			catch (const std::exception &e)
 			{
-				snprintf(g_loadError, sizeof g_loadError, "'%s' does not fit this machine: %s",
+				snprintf(g_loadError, sizeof g_loadError, "error.save_does_not_fit" TEXT_ARG "%s" TEXT_ARG "%s",
 					saveName, e.what());
 				return 0;
 			}

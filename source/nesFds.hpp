@@ -113,7 +113,7 @@ struct FdsDrive
     size_t pos = 0;
     auto read = [&](size_t n) -> const uint8_t*
     {
-      if (pos + n > inputSize) throw std::runtime_error("truncated FDS disk side");
+      if (pos + n > inputSize) throw std::runtime_error("error.fds_side_truncated");
       const uint8_t* p = inputdisk + pos;
       pos += n;
       return p;
@@ -127,14 +127,14 @@ struct FdsDrive
     static const uint8_t compare[] = { 0x01, 0x2a, 0x4e, 0x49, 0x4e, 0x54, 0x45, 0x4e, 0x44, 0x4f, 0x2d, 0x48, 0x56, 0x43, 0x2a };
     for (size_t i = 0; i < sizeof compare; i++)
     {
-      if (compare[i] != header[i]) throw std::runtime_error("Corrupt FDS block 1");
+      if (compare[i] != header[i]) throw std::runtime_error("error.fds_block1");
     }
     // the rest of block 1 isn't terribly important to parse
     WriteBlock(ret, header, 56, 3537);
 
     // block 2: number of files
     const uint8_t* numfileblock = read(2);
-    if (numfileblock[0] != 0x02) throw std::runtime_error("Corrupt FDS block 2");
+    if (numfileblock[0] != 0x02) throw std::runtime_error("error.fds_block2");
     const int numfiles = numfileblock[1];
     WriteBlock(ret, numfileblock, 2, 122);
 
@@ -178,7 +178,7 @@ struct FdsDrive
   /// insert a new disk. might have to eject first???
   void Insert(std::vector<uint8_t> side, int bitlength, bool writeProtect)
   {
-    if (side.size() * 8 < (size_t)bitlength) throw std::runtime_error("Disk too small for parameter!");
+    if (side.size() * 8 < (size_t)bitlength) throw std::runtime_error("error.fds_too_small");
     disk = std::move(side);
     disksize = bitlength;
     diskpos = 0;
@@ -197,7 +197,7 @@ struct FdsDrive
   void ApplyDiff(const std::vector<uint8_t>& data)
   {
     int bitsize = data[0] * 0x10000 + data[1] * 0x100 + data[2];
-    if (bitsize != disksize) throw std::runtime_error("Disk size mismatch!");
+    if (bitsize != disksize) throw std::runtime_error("error.fds_size");
     int pos = 0;
     while (bitsize > 0)
     {

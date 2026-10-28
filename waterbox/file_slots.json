@@ -3,25 +3,25 @@
   "slots": [
     {
       "id": "rom",
-      "title": "Cartridge or Famicom disk",
+      "title": "slot.rom",
       "min": 1,
       "max": 1,
       "formats": [
         "nes",
         "fds"
       ],
-      "help": "The game. It is either a cartridge file in iNES format (.nes) or a Famicom Disk System image (.fds). A disk needs the FDS BIOS, which the next wizard page asks for. A cartridge needs none."
+      "help": "slot.rom.help"
     },
     {
       "id": "savedata",
-      "title": "Save data",
+      "title": "slot.savedata",
       "min": 0,
       "max": 1,
       "formats": [
         "sav",
         "srm"
       ],
-      "help": "The saved game the machine starts with. This is the file that Emulator > Export Save Data... writes. It is battery.sav for a cartridge with a battery, and disk.sav for a Famicom Disk System, where the save is the difference between the disk as it is now and the disk that was loaded. The file is never changed. The project and the movie record exactly which file it was, so a movie that starts from a saved game can be played back by anyone who has the same file. A machine that keeps no saves (no battery and no disk) says so."
+      "help": "slot.savedata.help"
     }
   ]
 }

@@ -164,7 +164,7 @@ class NES
     if (wramPattern != nullptr && wramPatternSize != 0)
       initialWRamStatePattern.assign(wramPattern, wramPattern + wramPatternSize);
 
-    if (romFileSize < 16) throw std::runtime_error("ROM file smaller than an iNES header");
+    if (romFileSize < 16) throw std::runtime_error("error.smaller_than_header");
 
     // NES.cs: a disk image is not a cartridge at all - no mapper, no PRG, no CHR. Both dump shapes
     // in circulation are accepted, headered and raw, as the board normalizes them.
@@ -174,7 +174,7 @@ class NES
       return;
     }
 
-    if (memcmp(romFile, "NES\x1A", 4) != 0) throw std::runtime_error("not an iNES file");
+    if (memcmp(romFile, "NES\x1A", 4) != 0) throw std::runtime_error("error.not_ines");
     const int mapper = (romFile[6] >> 4) | (romFile[7] & 0xF0);
     const int chr8   = romFile[5];
     // Only the boards translated here (see NesBoard). The real NesHawk resolves the board from the
@@ -192,9 +192,9 @@ class NES
       case 7:  kind = NesBoard::Kind::AxROM; break;
       case 66: kind = NesBoard::Kind::GxROM; break;
       case 70: kind = NesBoard::Kind::B74x;  break;
-      default: throw std::runtime_error("unsupported mapper (this translation has NROM, SxROM, UxROM, CNROM, TxROM, AxROM, GxROM and mapper 70)");
+      default: throw std::runtime_error("error.unsupported_mapper");
     }
-    if ((romFile[6] & 4) != 0) throw std::runtime_error("trainers are not supported");
+    if ((romFile[6] & 4) != 0) throw std::runtime_error("error.trainer");
 
     // Everything the two boards need comes out of the iNES header; NesHawk would take it from the
     // cart database, which is also where a board type with a bus-conflict or WRAM quirk would come
@@ -206,9 +206,9 @@ class NES
     cart.WramBattery = (romFile[6] & 2) != 0; // flags6 bit1: the cart has a battery behind its WRAM
     cart.PadH     = (romFile[6] & 1) ? 1 : 0;
     cart.PadV     = (romFile[6] & 1) ? 0 : 1;
-    if (cart.PrgSize == 0) throw std::runtime_error("iNES header declares no PRG ROM");
+    if (cart.PrgSize == 0) throw std::runtime_error("error.no_prg");
     if (romFileSize < 16 + (size_t)cart.PrgSize * 1024 + (size_t)chr8 * 8 * 1024)
-      throw std::runtime_error("ROM file too small for its header-declared sizes");
+      throw std::runtime_error("error.too_small");
 
     board = std::make_unique<NesBoard>();
     board->kind = kind;
@@ -243,9 +243,7 @@ class NES
   void InitFds(const uint8_t* image, size_t imageSize, const uint8_t* biosRom, size_t biosRomSize)
   {
     if (biosRom == nullptr || biosRomSize != 8192)
-      throw std::runtime_error("this is a Famicom Disk System disk image, which needs the 8192-byte "
-                               "Disk System BIOS. The package declares it as firmware named \"bios\"; "
-                               "in miniHawk, set it in Emulator > Firmware");
+      throw std::runtime_error("error.fds_needs_bios");
 
     // NES.cs: "Using NTSC display type for FDS disk image"
     _display_type = PPU::Region::NTSC;

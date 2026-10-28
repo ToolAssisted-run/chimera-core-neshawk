@@ -320,21 +320,21 @@ class NesBoard final : public NesBoardBase
       size_t pos = 0;
       auto get32 = [&]() -> uint32_t
       {
-        if (pos + 4 > length) throw std::runtime_error("FDS Saveram: truncated");
+        if (pos + 4 > length) throw std::runtime_error("error.fds_save_truncated");
         const uint32_t v = (uint32_t)data[pos] | ((uint32_t)data[pos + 1] << 8)
           | ((uint32_t)data[pos + 2] << 16) | ((uint32_t)data[pos + 3] << 24);
         pos += 4;
         return v;
       };
 
-      if (length < 8 || memcmp(data, "FDSS", 4) != 0) throw std::runtime_error("FDS Saveram: bad header");
+      if (length < 8 || memcmp(data, "FDSS", 4) != 0) throw std::runtime_error("error.fds_save_header");
       pos = 4;
       const int sides = (int)get32();
-      if (sides != NumSides()) throw std::runtime_error("FDS Saveram: wrong number of sides");
+      if (sides != NumSides()) throw std::runtime_error("error.fds_save_sides");
       for (int i = 0; i < sides; i++)
       {
         const uint32_t len = get32();
-        if (pos + len > length) throw std::runtime_error("FDS Saveram: truncated");
+        if (pos + len > length) throw std::runtime_error("error.fds_save_truncated");
         diskdiffs[(size_t)i].assign(data + pos, data + pos + len);
         pos += len;
       }
@@ -344,9 +344,9 @@ class NesBoard final : public NesBoardBase
 
     void InsertSide(int side)
     {
-      if (side >= NumSides()) throw std::runtime_error("FDS: no such disk side");
+      if (side >= NumSides()) throw std::runtime_error("error.fds_no_side");
       const size_t offset = 16 + (size_t)side * 65500;
-      if (offset + 65500 > diskimage.size()) throw std::runtime_error("FDS: disk image is short a side");
+      if (offset + 65500 > diskimage.size()) throw std::runtime_error("error.fds_short");
       drive.InsertBrokenImage(diskimage.data() + offset, 65500, false);
       if (!diskdiffs[(size_t)side].empty()) drive.ApplyDiff(diskdiffs[(size_t)side]);
       currentside = side;
@@ -687,7 +687,7 @@ class NesBoard final : public NesBoardBase
   {
     if (kind == Kind::FDS) { fds.StoreSaveRam(data, length); return; }
     if (!Cart.WramBattery) return;
-    if (length != Wram.size()) throw std::runtime_error("save file is the wrong size for this cart");
+    if (length != Wram.size()) throw std::runtime_error("error.save_size");
     memcpy(Wram.data(), data, length);
   }
 
