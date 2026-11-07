@@ -38,9 +38,21 @@ jobs:
   core-gate:
     # The fast half: the sandboxed core must emulate byte-identically to the same sources built for
     # the host, and survive a savestate round-trip around every frame. No Chimera window or display involved.
-    name: core gate (equivalence + savestates)
-    runs-on: ubuntu-latest
+    # Once per CPU, each on a runner of that CPU: a package is machine code for
+    # one CPU, and miniBox's guest toolchain builds for the CPU it runs on.
+    name: core gate (equivalence + savestates) (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+            qt: gcc_64
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+            qt: gcc_arm64
     steps:
       - uses: actions/checkout@v6
 
@@ -67,7 +79,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: minihawk-checkout/extern/chimera-common-minibox/build/meson-cpp
-          key: guest-cpp-${{ runner.os }}-${{ hashFiles('minihawk-checkout/extern/chimera-common-minibox/.git') }}-${{ hashFiles('minihawk-checkout/extern/chimera-common-minibox/meson.build') }}
+          key: guest-cpp-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('minihawk-checkout/extern/chimera-common-minibox/.git') }}-${{ hashFiles('minihawk-checkout/extern/chimera-common-minibox/meson.build') }}
 
       - name: Build miniBox (host + C++ guest toolchain)
         run: |
@@ -93,7 +105,7 @@ jobs:
       - name: Upload core.wbx
         uses: actions/upload-artifact@v7
         with:
-          name: core-wbx
+          name: core-wbx-${{ matrix.arch }}
           path: |
             build/meson-guest/core.wbx
             waterbox/waterbox.config
@@ -104,9 +116,21 @@ jobs:
     # headless, loading it through the generic waterbox adapter). The emulated RAM must match the
     # native reference, and sync settings must reach the guest. Builds all of miniHawk, so it takes
     # minutes; the core gate gives fast feedback meanwhile.
-    name: frontend gate (miniHawk)
-    runs-on: ubuntu-latest
+    # Once per CPU, each on a runner of that CPU: a package is machine code for
+    # one CPU, and miniBox's guest toolchain builds for the CPU it runs on.
+    name: frontend gate (miniHawk) (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+            qt: gcc_64
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+            qt: gcc_arm64
     steps:
       - uses: actions/checkout@v6
 
@@ -122,7 +146,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/qt
-          key: qt-6.12.0-linux-aqt-3.3.0
+          key: qt-6.12.0-linux-${{ matrix.arch }}-aqt-3.3.0
 
       - name: Build Chimera (the engine, chimera-run and the window)
         run: minihawk-checkout/tools/ci-chimera.sh "$HOME/qt"
@@ -131,7 +155,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: minihawk-checkout/extern/chimera-common-minibox/build/meson-cpp
-          key: guest-cpp-${{ runner.os }}-${{ hashFiles('minihawk-checkout/extern/chimera-common-minibox/.git') }}-${{ hashFiles('minihawk-checkout/extern/chimera-common-minibox/meson.build') }}
+          key: guest-cpp-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('minihawk-checkout/extern/chimera-common-minibox/.git') }}-${{ hashFiles('minihawk-checkout/extern/chimera-common-minibox/meson.build') }}
 
       - name: Build miniBox (host + C++ guest toolchain)
         run: |
@@ -161,7 +185,7 @@ jobs:
         # no artifact. The version inside it is the commit above.
         uses: actions/upload-artifact@v7
         with:
-          name: quickerneshawk-${{ github.sha }}
+          name: quickerneshawk-${{ github.sha }}-${{ matrix.arch }}
           path: minihawk-checkout/build/Cores/quickerneshawk.chimeraCore
           if-no-files-found: error
 
@@ -169,7 +193,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: frontend-gate-work
+          name: frontend-gate-work-${{ matrix.arch }}
           path: waterbox/tests/work/
 
   publish:
@@ -192,3 +216,4 @@ jobs:
       core-id: quickerneshawk
       artifact: quickerneshawk-${{ github.sha }}
       package: quickerneshawk.chimeraCore
+      arches: x86_64 aarch64
